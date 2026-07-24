@@ -171,6 +171,60 @@
     outline:none;
     border-color: var(--accent);
   }
+  .field textarea{
+    background: rgba(255,255,255,0.06);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px;
+    color: var(--text);
+    font-size:16px;
+    font-family:inherit;
+    width:100%;
+    resize:vertical;
+  }
+  .field textarea:focus{
+    outline:none;
+    border-color: var(--accent);
+  }
+  .field input[type="file"]{
+    font-size:12px;
+    color: var(--text-dim);
+    width:100%;
+  }
+  .image-previews{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:8px;
+  }
+  .img-preview{
+    position:relative;
+    width:64px;
+    height:64px;
+    border-radius:8px;
+    overflow:hidden;
+    border:1px solid var(--border);
+  }
+  .img-preview img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
+  }
+  .img-remove{
+    position:absolute;
+    top:2px;
+    left:2px;
+    background: rgba(0,0,0,0.65);
+    color:#fff;
+    border:none;
+    border-radius:6px;
+    width:18px;
+    height:18px;
+    font-size:11px;
+    line-height:1;
+    cursor:pointer;
+  }
   #tradeDate{
     font-size:16px;
     padding:8px 6px;
@@ -301,6 +355,91 @@
   }
   .cal-week{
     background: rgba(255,255,255,0.06);
+  }
+  .cal-day:not(.cal-week){ cursor:pointer; }
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background: rgba(0,0,0,0.6);
+    z-index:50;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-box{
+    background: var(--glass-bg-strong);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    max-width:520px;
+    width:100%;
+    max-height:85vh;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid var(--border);
+    font-size:15px;
+    font-weight:700;
+  }
+  .modal-close{
+    background:none;
+    border:none;
+    color: var(--text-dim);
+    font-size:16px;
+    cursor:pointer;
+    padding:4px 6px;
+  }
+  .modal-close:hover{ color: var(--text); }
+  .modal-body{
+    padding:16px;
+    overflow-y:auto;
+  }
+
+  /* ---------- Trade detail ---------- */
+  .detail-row{
+    display:flex;
+    justify-content:space-between;
+    padding:8px 0;
+    border-bottom:1px solid var(--border);
+    font-size:14px;
+  }
+  .detail-row:last-of-type{ border-bottom:none; }
+  .detail-label{ color: var(--text-dim); }
+  .detail-notes{ margin-top:14px; }
+  .detail-notes .detail-label{ font-size:13px; margin-bottom:6px; display:block; }
+  .detail-notes-text{
+    font-size:14px;
+    line-height:1.6;
+    white-space:pre-wrap;
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px;
+  }
+  .detail-images{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:14px;
+  }
+  .detail-img{
+    width:100px;
+    height:100px;
+    object-fit:cover;
+    border-radius:8px;
+    border:1px solid var(--border);
+    cursor:pointer;
   }
 
   /* ---------- Trade list ---------- */
@@ -476,6 +615,15 @@
           </div>
         </div>
         <div class="preview" id="pointsPreview">נקודות: <b>—</b></div>
+        <div class="field">
+          <label for="tradeNotes">פירוט ההחלטה</label>
+          <textarea id="tradeNotes" rows="3" placeholder="מה הייתה הסיבה לכניסה/יציאה..."></textarea>
+        </div>
+        <div class="field">
+          <label>תמונות</label>
+          <input type="file" id="tradeImages" accept="image/*" multiple>
+          <div class="image-previews" id="imagePreviews"></div>
+        </div>
         <div class="form-actions">
           <button type="submit" class="submit-btn" id="submitBtn">הוסף עסקה</button>
           <button type="button" class="cancel-btn" id="cancelBtn">ביטול</button>
@@ -502,6 +650,16 @@
   </div>
   </div>
 
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span id="modalTitle"></span>
+        <button class="modal-close" id="modalCloseBtn" type="button">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   const SUPABASE_URL = 'https://ioojflppnvfrcjzlhdvj.supabase.co';
@@ -518,7 +676,121 @@
   const entryInput = $('#entryPrice');
   const exitInput = $('#exitPrice');
   const dateInput = $('#tradeDate');
+  const notesInput = $('#tradeNotes');
   dateInput.value = todayStr();
+
+  let formImages = []; // { path, url }
+
+  function pad2(n){ return String(n).padStart(2, '0'); }
+  function dateToISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
+
+  function escapeHtml(s){
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function pathFromPublicUrl(url){
+    const marker = '/trade-images/';
+    const idx = url.indexOf(marker);
+    return idx === -1 ? null : url.slice(idx + marker.length);
+  }
+
+  async function uploadImageFile(file){
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await sb.storage.from('trade-images').upload(path, file);
+    if (error){
+      console.error(error);
+      setSyncStatus('שגיאה בהעלאת תמונה', 'error');
+      return null;
+    }
+    const { data } = sb.storage.from('trade-images').getPublicUrl(path);
+    return { path, url: data.publicUrl };
+  }
+
+  function renderImagePreviews(){
+    const container = $('#imagePreviews');
+    container.innerHTML = '';
+    formImages.forEach((img, idx) => {
+      const div = document.createElement('div');
+      div.className = 'img-preview';
+      div.innerHTML = `<img src="${img.url}"><button type="button" class="img-remove" title="הסר">✕</button>`;
+      div.querySelector('.img-remove').addEventListener('click', () => {
+        const removed = formImages.splice(idx, 1)[0];
+        renderImagePreviews();
+        if (removed && removed.path) sb.storage.from('trade-images').remove([removed.path]);
+      });
+      container.appendChild(div);
+    });
+  }
+
+  $('#tradeImages').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    setSyncStatus('מעלה תמונות…', 'loading');
+    for (const file of files){
+      const uploaded = await uploadImageFile(file);
+      if (uploaded) formImages.push(uploaded);
+    }
+    renderImagePreviews();
+    setSyncStatus('מסונכרן ✓', 'ok');
+  });
+
+  // ---- modal ----
+  function openModal(title, contentNode){
+    $('#modalTitle').textContent = title;
+    const body = $('#modalBody');
+    body.innerHTML = '';
+    body.appendChild(contentNode);
+    $('#modalOverlay').classList.add('show');
+  }
+  function closeModal(){
+    $('#modalOverlay').classList.remove('show');
+    $('#modalBody').innerHTML = '';
+  }
+  $('#modalCloseBtn').addEventListener('click', closeModal);
+  $('#modalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'modalOverlay') closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  $('#calGrid').addEventListener('click', (e) => {
+    const cell = e.target.closest('.cal-day[data-date]');
+    if (cell) openDayTrades(cell.dataset.date);
+  });
+
+  function openTradeDetail(t){
+    const wrap = document.createElement('div');
+    const imagesHtml = (t.images||[]).length
+      ? `<div class="detail-images">${t.images.map(url=>`<img src="${url}" class="detail-img" onclick="window.open('${url}','_blank')">`).join('')}</div>`
+      : '';
+    wrap.innerHTML = `
+      <div class="detail-row"><span class="detail-label">כיוון</span><span class="trade-dir ${t.dir}">${t.dir==='long'?'לונג':'שורט'}</span></div>
+      <div class="detail-row"><span class="detail-label">תאריך</span><span>${formatDisplayDate(t.date)}</span></div>
+      <div class="detail-row"><span class="detail-label">סכום כניסה</span><span>${t.entry}</span></div>
+      <div class="detail-row"><span class="detail-label">סכום יציאה</span><span>${t.exit}</span></div>
+      <div class="detail-row"><span class="detail-label">נקודות</span><span class="${pointsClass(t.points)}">${fmtPoints(t.points)}</span></div>
+      ${t.notes ? `<div class="detail-notes"><span class="detail-label">פירוט ההחלטה</span><div class="detail-notes-text">${escapeHtml(t.notes)}</div></div>` : ''}
+      ${imagesHtml}
+    `;
+    openModal('פרטי עסקה', wrap);
+  }
+
+  function openDayTrades(dateStr){
+    const dayTrades = trades.filter(t => t.date === dateStr).sort((a,b) => b.id - a.id);
+    const wrap = document.createElement('div');
+    wrap.className = 'trades-list';
+    if (dayTrades.length === 0){
+      wrap.innerHTML = '<div class="empty">אין עסקאות ביום זה</div>';
+    } else {
+      dayTrades.forEach(t => wrap.appendChild(buildTradeRow(t)));
+    }
+    openModal(formatDisplayDate(dateStr), wrap);
+  }
 
   function todayStr(){
     const d = new Date();
@@ -596,7 +868,11 @@
     const date = dateInput.value;
     if (isNaN(entry) || isNaN(exit) || !date) return;
     const points = calcPoints(currentDir, entry, exit);
-    const payload = { dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points };
+    const payload = {
+      dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points,
+      notes: notesInput.value.trim(),
+      image_urls: formImages.map(img => img.url)
+    };
 
     const submitBtn = $('#submitBtn');
     submitBtn.disabled = true;
@@ -629,6 +905,9 @@
     entryInput.value = '';
     exitInput.value = '';
     dateInput.value = todayStr();
+    notesInput.value = '';
+    formImages = [];
+    renderImagePreviews();
     setDir('long');
     updatePreview();
   }
@@ -646,6 +925,9 @@
     dateInput.value = t.date;
     entryInput.value = t.entry;
     exitInput.value = t.exit;
+    notesInput.value = t.notes || '';
+    formImages = (t.images || []).map(url => ({ path: pathFromPublicUrl(url), url }));
+    renderImagePreviews();
     updatePreview();
     $('#formTitle').textContent = 'עריכת עסקה';
     $('#submitBtn').textContent = 'עדכן עסקה';
@@ -667,7 +949,9 @@
       date: r.trade_date,
       entry: Number(r.entry_price),
       exit: Number(r.exit_price),
-      points: Number(r.points)
+      points: Number(r.points),
+      notes: r.notes || '',
+      images: r.image_urls || []
     };
   }
 
@@ -696,11 +980,16 @@
 
   async function deleteTrade(id){
     setSyncStatus('מוחק…', 'loading');
+    const t = trades.find(t => t.id === id);
     const { error } = await sb.from('trades').delete().eq('id', id);
     if (error){
       console.error(error);
       setSyncStatus('שגיאה במחיקה — בדוק חיבור', 'error');
       return;
+    }
+    if (t && t.images && t.images.length){
+      const paths = t.images.map(pathFromPublicUrl).filter(Boolean);
+      if (paths.length) sb.storage.from('trade-images').remove(paths);
     }
     if (editingId === id){
       stopEdit();
@@ -784,7 +1073,7 @@
         let cls = 'cal-day';
         if (outside) cls += ' outside';
         if (count > 0) cls += pts > 0 ? ' cal-pos' : (pts < 0 ? ' cal-neg' : '');
-        html += `<div class="${cls}">
+        html += `<div class="${cls}" data-date="${dateToISO(d)}">
           <div class="cal-daynum">${d.getDate()}</div>
           ${count>0 ? `<div class="cal-pts ${pointsClass(pts)}">${fmtPointsCal(pts)}</div>` : ''}
         </div>`;
@@ -849,25 +1138,36 @@
       container.innerHTML = '<div class="empty">אין עסקאות להצגה</div>';
       return;
     }
-    list.forEach(t=>{
-      const row = document.createElement('div');
-      row.className = 'trade-row' + (t.id === editingId ? ' editing' : '');
-      row.innerHTML = `
-        <span class="trade-dir ${t.dir}">${t.dir === 'long' ? 'לונג' : 'שורט'}</span>
-        <div class="trade-info">
-          <span class="trade-date">${formatDisplayDate(t.date)}</span>
-          <span class="trade-prices">כניסה ${t.entry} · יציאה ${t.exit}</span>
-        </div>
-        <span class="trade-points ${pointsClass(t.points)}">${fmtPoints(t.points)}</span>
-        <div class="row-actions">
-          <button class="edit-btn" title="ערוך">✎</button>
-          <button class="del-btn" title="מחק">✕</button>
-        </div>
-      `;
-      row.querySelector('.edit-btn').addEventListener('click', ()=>startEdit(t));
-      row.querySelector('.del-btn').addEventListener('click', ()=>deleteTrade(t.id));
-      container.appendChild(row);
+    list.forEach(t => container.appendChild(buildTradeRow(t)));
+  }
+
+  function buildTradeRow(t){
+    const row = document.createElement('div');
+    row.className = 'trade-row' + (t.id === editingId ? ' editing' : '');
+    row.innerHTML = `
+      <span class="trade-dir ${t.dir}">${t.dir === 'long' ? 'לונג' : 'שורט'}</span>
+      <div class="trade-info">
+        <span class="trade-date">${formatDisplayDate(t.date)}</span>
+        <span class="trade-prices">כניסה ${t.entry} · יציאה ${t.exit}</span>
+      </div>
+      <span class="trade-points ${pointsClass(t.points)}">${fmtPoints(t.points)}</span>
+      <div class="row-actions">
+        <button class="edit-btn" title="ערוך">✎</button>
+        <button class="del-btn" title="מחק">✕</button>
+      </div>
+    `;
+    row.querySelector('.edit-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeModal();
+      startEdit(t);
     });
+    row.querySelector('.del-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteTrade(t.id);
+    });
+    row.addEventListener('click', () => openTradeDetail(t));
+    row.style.cursor = 'pointer';
+    return row;
   }
 
   function setStat(sel, val){
