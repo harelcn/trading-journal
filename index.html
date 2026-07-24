@@ -25,7 +25,7 @@
     --radius: 16px;
   }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;min-height:100%;background:#08090c;}
+  html,body{margin:0;padding:0;min-height:100%;}
   body{
     font-family: 'Segoe UI', Arial, Tahoma, sans-serif;
     color: var(--text);
@@ -64,6 +64,15 @@
     -webkit-backdrop-filter: blur(14px);
     padding: 16px;
   }
+
+  .sync-status{
+    font-size:11px;
+    text-align:center;
+    color: var(--text-dim);
+    margin-bottom:10px;
+  }
+  .sync-status.ok{ color: var(--green); }
+  .sync-status.error{ color: var(--red); }
 
   /* ---------- Summary bar ---------- */
   .summary{
@@ -342,6 +351,7 @@
   <div class="app">
     <!-- Summary Bar -->
     <div class="card summary-card">
+      <div class="sync-status" id="syncStatus">מתחבר לשרת…</div>
       <div class="summary">
         <div class="summary-row">
           <div class="stat big">
@@ -413,9 +423,13 @@
     </div>
   </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-  const STORAGE_KEY = 'nostro_journal_trades_v1';
-  let trades = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  const SUPABASE_URL = 'https://ioojflppnvfrcjzlhdvj.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_RMUv-K9nN3BE6HycUkSSPA_xmj1wjzf';
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let trades = [];
   let currentFilter = 'day';
   let currentDir = 'long';
   let editingId = null;
@@ -485,38 +499,35 @@
   });
 
   // ---- form submit (add or update) ----
-  $('#tradeForm').addEventListener('submit', (e)=>{
+  $('#tradeForm').addEventListener('submit', async (e)=>{
     e.preventDefault();
     const entry = parseFloat(entryInput.value);
     const exit = parseFloat(exitInput.value);
     const date = dateInput.value;
     if (isNaN(entry) || isNaN(exit) || !date) return;
     const points = calcPoints(currentDir, entry, exit);
+    const payload = { dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points };
 
-    if (editingId !== null){
-      const t = trades.find(t => t.id === editingId);
-      if (t){
-        t.dir = currentDir;
-        t.date = date;
-        t.entry = entry;
-        t.exit = exit;
-        t.points = points;
-      }
-      stopEdit();
-    } else {
-      trades.push({
-        id: Date.now() + Math.random(),
-        dir: currentDir,
-        date,
-        entry,
-        exit,
-        points
-      });
+    const submitBtn = $('#submitBtn');
+    submitBtn.disabled = true;
+    setSyncStatus('שומר…', 'loading');
+
+    const wasEditing = editingId;
+    const { error } = wasEditing !== null
+      ? await sb.from('trades').update(payload).eq('id', wasEditing)
+      : await sb.from('trades').insert(payload);
+
+    submitBtn.disabled = false;
+
+    if (error){
+      console.error(error);
+      setSyncStatus('שגיאה בשמירה — בדוק חיבור', 'error');
+      return;
     }
 
-    save();
+    stopEdit();
     resetForm();
-    render();
+    await loadTrades();
   });
 
   $('#cancelBtn').addEventListener('click', ()=>{
@@ -559,19 +570,61 @@
     $('#cancelBtn').classList.remove('show');
   }
 
-  function save(){
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trades));
+  function rowToTrade(r){
+    return {
+      id: r.id,
+      dir: r.dir,
+      date: r.trade_date,
+      entry: Number(r.entry_price),
+      exit: Number(r.exit_price),
+      points: Number(r.points)
+    };
   }
 
-  function deleteTrade(id){
-    trades = trades.filter(t => t.id !== id);
+  function setSyncStatus(text, type){
+    const el = $('#syncStatus');
+    el.textContent = text;
+    el.className = 'sync-status' + (type ? ' ' + type : '');
+  }
+
+  async function loadTrades(){
+    const { data, error } = await sb
+      .from('trades')
+      .select('*')
+      .order('trade_date', { ascending:false })
+      .order('id', { ascending:false });
+
+    if (error){
+      console.error(error);
+      setSyncStatus('שגיאה בטעינת נתונים — בדוק חיבור', 'error');
+      return;
+    }
+    trades = (data || []).map(rowToTrade);
+    setSyncStatus('מסונכרן ✓', 'ok');
+    render();
+  }
+
+  async function deleteTrade(id){
+    setSyncStatus('מוחק…', 'loading');
+    const { error } = await sb.from('trades').delete().eq('id', id);
+    if (error){
+      console.error(error);
+      setSyncStatus('שגיאה במחיקה — בדוק חיבור', 'error');
+      return;
+    }
     if (editingId === id){
       stopEdit();
       resetForm();
     }
-    save();
-    render();
+    await loadTrades();
   }
+
+  // ---- live sync across devices ----
+  sb.channel('trades-sync')
+    .on('postgres_changes', { event:'*', schema:'public', table:'trades' }, () => {
+      loadTrades();
+    })
+    .subscribe();
 
   // ---- date helpers ----
   function parseLocal(dateStr){
@@ -668,7 +721,7 @@
     return d.toLocaleDateString('he-IL');
   }
 
-  render();
+  loadTrades();
 </script>
 </body>
 </html>
