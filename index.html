@@ -237,26 +237,49 @@
     font-size:17px;
   }
 
-  /* ---------- Monthly calendar (desktop only) ---------- */
+  /* ---------- Month view toggle (calendar / list) ---------- */
+  .month-view-toggle{
+    display:none;
+    gap:6px;
+    margin-top:10px;
+  }
+  .month-view-toggle button{
+    flex:1;
+    padding:8px 10px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-dim);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .month-view-toggle button.active{
+    background: rgba(110,168,255,0.2);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight:700;
+  }
+
+  /* ---------- Monthly calendar ---------- */
   .cal-grid{
     display:none;
     grid-template-columns: repeat(8, 1fr);
-    gap:6px;
+    gap:4px;
     margin-top:12px;
   }
   .cal-head{
-    font-size:11px;
+    font-size:9px;
     color: var(--text-dim);
     text-align:center;
-    padding:4px 0;
+    padding:2px 0;
   }
   .cal-day{
     position:relative;
     background: rgba(255,255,255,0.03);
     border:1px solid var(--border);
-    border-radius:10px;
-    padding:8px;
-    min-height:78px;
+    border-radius:8px;
+    padding:2px;
+    min-height:42px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -266,14 +289,14 @@
   .cal-day.cal-neg{ background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.35); }
   .cal-daynum{
     position:absolute;
-    top:6px;
-    right:8px;
-    font-size:13px;
+    top:2px;
+    right:3px;
+    font-size:9px;
     font-weight:600;
     color: var(--text);
   }
   .cal-pts{
-    font-size:16px;
+    font-size:10px;
     font-weight:700;
   }
   .cal-week{
@@ -386,6 +409,11 @@
       font-size:14px;
       padding:10px;
     }
+    .cal-grid{ gap:6px; }
+    .cal-head{ font-size:11px; padding:4px 0; }
+    .cal-day{ border-radius:10px; padding:8px; min-height:78px; }
+    .cal-daynum{ top:6px; right:8px; font-size:13px; }
+    .cal-pts{ font-size:16px; }
   }
 </style>
 </head>
@@ -463,6 +491,10 @@
         <button data-filter="month">חודשי</button>
         <button data-filter="all">הכל</button>
       </div>
+      <div class="month-view-toggle" id="monthViewToggle">
+        <button data-view="calendar" class="active">יומן</button>
+        <button data-view="list">עסקאות</button>
+      </div>
       <div class="interval-summary" id="intervalSummary"></div>
       <div class="trades-list" id="tradesList"></div>
       <div class="cal-grid" id="calGrid"></div>
@@ -478,6 +510,7 @@
 
   let trades = [];
   let currentFilter = 'day';
+  let monthView = 'calendar';
   let currentDir = 'long';
   let editingId = null;
 
@@ -540,6 +573,16 @@
     btn.addEventListener('click', ()=>{
       currentFilter = btn.dataset.filter;
       document.querySelectorAll('.filter-bar button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    });
+  });
+
+  // ---- month view toggle (calendar / list) ----
+  document.querySelectorAll('.month-view-toggle button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      monthView = btn.dataset.view;
+      document.querySelectorAll('.month-view-toggle button').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       render();
     });
@@ -694,10 +737,6 @@
     return [start, end];
   }
 
-  function isDesktopView(){
-    return window.innerWidth >= 640;
-  }
-
   function fmtPointsCal(n){
     const r = Math.round(n * 10) / 10;
     const abs = Math.abs(r);
@@ -758,11 +797,6 @@
     $('#calGrid').innerHTML = html;
   }
 
-  window.addEventListener('resize', () => {
-    clearTimeout(window._resizeTimer);
-    window._resizeTimer = setTimeout(render, 200);
-  });
-
   function render(){
     const now = new Date();
 
@@ -799,7 +833,9 @@
 
     list.sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id);
 
-    const showCalendar = isDesktopView() && currentFilter === 'month';
+    const isMonth = currentFilter === 'month';
+    $('#monthViewToggle').style.display = isMonth ? 'flex' : 'none';
+    const showCalendar = isMonth && monthView === 'calendar';
     $('#calGrid').style.display = showCalendar ? 'grid' : 'none';
     $('#tradesList').style.display = showCalendar ? 'none' : 'flex';
     if (showCalendar){
