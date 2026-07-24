@@ -434,12 +434,32 @@
     margin-top:14px;
   }
   .detail-img{
-    width:100px;
-    height:100px;
+    width:200px;
+    height:200px;
     object-fit:cover;
-    border-radius:8px;
+    border-radius:10px;
     border:1px solid var(--border);
     cursor:pointer;
+  }
+
+  /* ---------- Image lightbox ---------- */
+  .lightbox-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background: rgba(0,0,0,0.85);
+    z-index:60;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    cursor:zoom-out;
+  }
+  .lightbox-overlay.show{ display:flex; }
+  .lightbox-overlay img{
+    max-width:100%;
+    max-height:100%;
+    border-radius:10px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.6);
   }
 
   /* ---------- Trade list ---------- */
@@ -650,6 +670,10 @@
   </div>
   </div>
 
+  <div class="lightbox-overlay" id="lightboxOverlay">
+    <img id="lightboxImg" src="" alt="">
+  </div>
+
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal-box">
       <div class="modal-header">
@@ -755,7 +779,9 @@
     if (e.target.id === 'modalOverlay') closeModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal();
+    if (e.key !== 'Escape') return;
+    if ($('#lightboxOverlay').classList.contains('show')) closeLightbox();
+    else closeModal();
   });
 
   $('#calGrid').addEventListener('click', (e) => {
@@ -763,10 +789,20 @@
     if (cell) openDayTrades(cell.dataset.date);
   });
 
+  function openLightbox(url){
+    $('#lightboxImg').src = url;
+    $('#lightboxOverlay').classList.add('show');
+  }
+  function closeLightbox(){
+    $('#lightboxOverlay').classList.remove('show');
+    $('#lightboxImg').src = '';
+  }
+  $('#lightboxOverlay').addEventListener('click', closeLightbox);
+
   function openTradeDetail(t){
     const wrap = document.createElement('div');
     const imagesHtml = (t.images||[]).length
-      ? `<div class="detail-images">${t.images.map(url=>`<img src="${url}" class="detail-img" onclick="window.open('${url}','_blank')">`).join('')}</div>`
+      ? `<div class="detail-images">${t.images.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>`
       : '';
     wrap.innerHTML = `
       <div class="detail-row"><span class="detail-label">כיוון</span><span class="trade-dir ${t.dir}">${t.dir==='long'?'לונג':'שורט'}</span></div>
@@ -777,6 +813,9 @@
       ${t.notes ? `<div class="detail-notes"><span class="detail-label">פירוט ההחלטה</span><div class="detail-notes-text">${escapeHtml(t.notes)}</div></div>` : ''}
       ${imagesHtml}
     `;
+    wrap.querySelectorAll('.detail-img').forEach(img => {
+      img.addEventListener('click', () => openLightbox(img.src));
+    });
     openModal('פרטי עסקה', wrap);
   }
 
