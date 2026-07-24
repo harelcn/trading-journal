@@ -264,15 +264,17 @@
   .cal-day.cal-pos{ background: rgba(34,197,94,0.14); border-color: rgba(34,197,94,0.35); }
   .cal-day.cal-neg{ background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.35); }
   .cal-daynum{ font-size:13px; font-weight:600; color: var(--text); }
-  .cal-count{ font-size:12px; color: var(--text-dim); }
-  .cal-pts{ font-size:15px; font-weight:700; }
-  .cal-week{
-    background: rgba(255,255,255,0.06);
+  .cal-pts{
+    flex:1;
+    display:flex;
     align-items:center;
     justify-content:center;
-    text-align:center;
+    font-size:16px;
+    font-weight:700;
   }
-  .cal-week .cal-count{ color: var(--accent); }
+  .cal-week{
+    background: rgba(255,255,255,0.06);
+  }
 
   /* ---------- Trade list ---------- */
   .trades-list{
@@ -741,11 +743,11 @@
         if (count > 0) cls += pts > 0 ? ' cal-pos' : (pts < 0 ? ' cal-neg' : '');
         html += `<div class="${cls}">
           <div class="cal-daynum">${d.getDate()}</div>
-          ${count>0 ? `<div class="cal-count ${pointsClass(pts)}">${count}</div><div class="cal-pts ${pointsClass(pts)}">${fmtPointsCal(pts)}</div>` : ''}
+          ${count>0 ? `<div class="cal-pts ${pointsClass(pts)}">${fmtPointsCal(pts)}</div>` : ''}
         </div>`;
       });
       html += `<div class="cal-day cal-week">
-        ${weekCount>0 ? `<div class="cal-count">${weekCount}</div><div class="cal-pts ${pointsClass(weekPts)}">${fmtPointsCal(weekPts)}</div>` : ''}
+        ${weekCount>0 ? `<div class="cal-pts ${pointsClass(weekPts)}">${fmtPointsCal(weekPts)}</div>` : ''}
       </div>`;
     });
 
