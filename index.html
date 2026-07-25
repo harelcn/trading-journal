@@ -25,7 +25,10 @@
     --radius: 16px;
   }
   *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#0a0908;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;}
+  @media (max-width: 899px){
+    html{background:#0a0908;}
+  }
   body{
     font-family: 'Segoe UI', Arial, Tahoma, sans-serif;
     color: var(--text);
