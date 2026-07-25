@@ -1569,7 +1569,7 @@
 
     chatHistory.push({ role: 'user', content: text });
     renderChatMessages();
-    sb.from('chat_messages').insert({ role: 'user', content: text });
+    await sb.from('chat_messages').insert({ role: 'user', content: text });
 
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-msg loading';
@@ -1592,7 +1592,7 @@
         chatHistory.push({ role: 'assistant', content: data.error || 'שגיאה בשרת' });
       } else {
         chatHistory.push({ role: 'assistant', content: data.text });
-        sb.from('chat_messages').insert({ role: 'assistant', content: data.text });
+        await sb.from('chat_messages').insert({ role: 'assistant', content: data.text });
       }
     } catch (err){
       console.error(err);
