@@ -197,6 +197,46 @@
     gap:8px;
     margin-top:8px;
   }
+  .tool-checklist{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .tool-check{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:14px;
+    color: var(--text);
+    cursor:pointer;
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:9px 12px;
+  }
+  .tool-check input{
+    width:16px;
+    height:16px;
+    accent-color: var(--accent);
+    cursor:pointer;
+  }
+  .tool-shots{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .tool-shot-section{
+    background: rgba(110,168,255,0.06);
+    border:1px solid var(--accent);
+    border-radius:10px;
+    padding:10px 12px;
+  }
+  .tool-shot-title{
+    font-size:13px;
+    font-weight:700;
+    color: var(--accent);
+    margin-bottom:8px;
+  }
   .img-preview{
     position:relative;
     width:64px;
@@ -416,6 +456,24 @@
   }
   .detail-row:last-of-type{ border-bottom:none; }
   .detail-label{ color: var(--text-dim); }
+  .detail-tools{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    margin-top:14px;
+  }
+  .detail-tool-chip{
+    font-size:12px;
+    font-weight:700;
+    color: var(--accent);
+    background: rgba(110,168,255,0.15);
+    border:1px solid var(--accent);
+    border-radius:8px;
+    padding:4px 10px;
+  }
+  .detail-tool-group{ margin-top:14px; }
+  .detail-tool-group .detail-label{ font-size:13px; margin-bottom:6px; display:block; }
+  .detail-tool-group .detail-images{ margin-top:0; }
   .detail-notes{ margin-top:14px; }
   .detail-notes .detail-label{ font-size:13px; margin-bottom:6px; display:block; }
   .detail-notes-text{
@@ -621,6 +679,11 @@
           <button type="button" data-dir="short">שורט</button>
         </div>
         <div class="field">
+          <label>כלים וסימונים שהשתמשתי בהם</label>
+          <div class="tool-checklist" id="toolChecklist"></div>
+        </div>
+        <div class="tool-shots" id="toolShots"></div>
+        <div class="field">
           <label for="tradeDate">תאריך</label>
           <input type="date" id="tradeDate" required>
         </div>
@@ -637,12 +700,7 @@
         <div class="preview" id="pointsPreview">נקודות: <b>—</b></div>
         <div class="field">
           <label for="tradeNotes">פירוט ההחלטה</label>
-          <textarea id="tradeNotes" rows="3" placeholder="מה הייתה הסיבה לכניסה/יציאה..."></textarea>
-        </div>
-        <div class="field">
-          <label>תמונות</label>
-          <input type="file" id="tradeImages" accept="image/*" multiple>
-          <div class="image-previews" id="imagePreviews"></div>
+          <textarea id="tradeNotes" rows="4" placeholder="תאר את כל תהליך העסקה..."></textarea>
         </div>
         <div class="form-actions">
           <button type="submit" class="submit-btn" id="submitBtn">הוסף עסקה</button>
@@ -703,7 +761,16 @@
   const notesInput = $('#tradeNotes');
   dateInput.value = todayStr();
 
-  let formImages = []; // { path, url }
+  const TOOL_DEFS = [
+    { key: 'smt', label: 'SMT' },
+    { key: 'print', label: 'פרינטים' },
+    { key: 'vp30', label: 'Volume Profile 30%' },
+    { key: 'consolidation', label: 'דשדוש' },
+    { key: 'ote', label: 'OTE' },
+    { key: 'ledge', label: 'Ledge' }
+  ];
+  let toolImages = {}; // { smt: [{path,url}], print: [...], ... }
+  TOOL_DEFS.forEach(t => { toolImages[t.key] = []; });
 
   function pad2(n){ return String(n).padStart(2, '0'); }
   function dateToISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
@@ -733,34 +800,67 @@
     return { path, url: data.publicUrl };
   }
 
-  function renderImagePreviews(){
-    const container = $('#imagePreviews');
+  function renderToolPreviews(tool){
+    const container = document.querySelector(`.image-previews[data-tool-preview="${tool}"]`);
+    if (!container) return;
     container.innerHTML = '';
-    formImages.forEach((img, idx) => {
+    toolImages[tool].forEach((img, idx) => {
       const div = document.createElement('div');
       div.className = 'img-preview';
       div.innerHTML = `<img src="${img.url}"><button type="button" class="img-remove" title="הסר">✕</button>`;
       div.querySelector('.img-remove').addEventListener('click', () => {
-        const removed = formImages.splice(idx, 1)[0];
-        renderImagePreviews();
+        const removed = toolImages[tool].splice(idx, 1)[0];
+        renderToolPreviews(tool);
         if (removed && removed.path) sb.storage.from('trade-images').remove([removed.path]);
       });
       container.appendChild(div);
     });
   }
 
-  $('#tradeImages').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
-    setSyncStatus('מעלה תמונות…', 'loading');
-    for (const file of files){
-      const uploaded = await uploadImageFile(file);
-      if (uploaded) formImages.push(uploaded);
-    }
-    renderImagePreviews();
-    setSyncStatus('מסונכרן ✓', 'ok');
-  });
+  function setToolSectionVisible(tool, visible){
+    const section = document.querySelector(`.tool-shot-section[data-tool="${tool}"]`);
+    if (section) section.style.display = visible ? 'block' : 'none';
+  }
+
+  function buildToolUI(){
+    const checklist = $('#toolChecklist');
+    const shots = $('#toolShots');
+    checklist.innerHTML = '';
+    shots.innerHTML = '';
+    TOOL_DEFS.forEach(({ key, label }) => {
+      const check = document.createElement('label');
+      check.className = 'tool-check';
+      check.innerHTML = `<input type="checkbox" class="tool-checkbox" data-tool="${key}"> ${label}`;
+      check.querySelector('input').addEventListener('change', (e) => {
+        setToolSectionVisible(key, e.target.checked);
+      });
+      checklist.appendChild(check);
+
+      const section = document.createElement('div');
+      section.className = 'tool-shot-section';
+      section.dataset.tool = key;
+      section.style.display = 'none';
+      section.innerHTML = `
+        <div class="tool-shot-title">${label}</div>
+        <input type="file" accept="image/*" multiple class="tool-shot-input" data-tool="${key}">
+        <div class="image-previews" data-tool-preview="${key}"></div>
+      `;
+      section.querySelector('.tool-shot-input').addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (files.length === 0) return;
+        setSyncStatus('מעלה תמונות…', 'loading');
+        for (const file of files){
+          const uploaded = await uploadImageFile(file);
+          if (uploaded) toolImages[key].push(uploaded);
+        }
+        renderToolPreviews(key);
+        setSyncStatus('מסונכרן ✓', 'ok');
+      });
+      shots.appendChild(section);
+    });
+  }
+  buildToolUI();
 
   // ---- modal ----
   function openModal(title, contentNode){
@@ -801,17 +901,37 @@
 
   function openTradeDetail(t){
     const wrap = document.createElement('div');
-    const imagesHtml = (t.images||[]).length
-      ? `<div class="detail-images">${t.images.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>`
+
+    const usedLabels = TOOL_DEFS.filter(({key}) => (t.toolsUsed||[]).includes(key)).map(({label}) => label);
+    const checklistHtml = usedLabels.length
+      ? `<div class="detail-tools">${usedLabels.map(l=>`<span class="detail-tool-chip">${l}</span>`).join('')}</div>`
       : '';
+
+    let toolImagesHtml = '';
+    TOOL_DEFS.forEach(({ key, label }) => {
+      const urls = (t.images && t.images[key]) || [];
+      if (!urls.length) return;
+      toolImagesHtml += `
+        <div class="detail-tool-group">
+          <div class="detail-label">${label}</div>
+          <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
+        </div>`;
+    });
+    const hasStructuredImages = toolImagesHtml.length > 0;
+    const legacyImagesHtml = (!hasStructuredImages && (t.legacyImages||[]).length)
+      ? `<div class="detail-tool-group"><div class="detail-label">תמונות</div><div class="detail-images">${t.legacyImages.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div></div>`
+      : '';
+
     wrap.innerHTML = `
       <div class="detail-row"><span class="detail-label">כיוון</span><span class="trade-dir ${t.dir}">${t.dir==='long'?'לונג':'שורט'}</span></div>
       <div class="detail-row"><span class="detail-label">תאריך</span><span>${formatDisplayDate(t.date)}</span></div>
       <div class="detail-row"><span class="detail-label">סכום כניסה</span><span>${t.entry}</span></div>
       <div class="detail-row"><span class="detail-label">סכום יציאה</span><span>${t.exit}</span></div>
       <div class="detail-row"><span class="detail-label">נקודות</span><span class="${pointsClass(t.points)}">${fmtPoints(t.points)}</span></div>
+      ${checklistHtml}
       ${t.notes ? `<div class="detail-notes"><span class="detail-label">פירוט ההחלטה</span><div class="detail-notes-text">${escapeHtml(t.notes)}</div></div>` : ''}
-      ${imagesHtml}
+      ${toolImagesHtml}
+      ${legacyImagesHtml}
     `;
     wrap.querySelectorAll('.detail-img').forEach(img => {
       img.addEventListener('click', () => openLightbox(img.src));
@@ -907,10 +1027,16 @@
     const date = dateInput.value;
     if (isNaN(entry) || isNaN(exit) || !date) return;
     const points = calcPoints(currentDir, entry, exit);
+    const toolsUsed = Array.from(document.querySelectorAll('.tool-checkbox:checked')).map(cb => cb.dataset.tool);
+    const images = {};
+    TOOL_DEFS.forEach(({ key }) => {
+      if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
+    });
     const payload = {
       dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points,
       notes: notesInput.value.trim(),
-      image_urls: formImages.map(img => img.url)
+      tools_used: toolsUsed,
+      images
     };
 
     const submitBtn = $('#submitBtn');
@@ -945,8 +1071,12 @@
     exitInput.value = '';
     dateInput.value = todayStr();
     notesInput.value = '';
-    formImages = [];
-    renderImagePreviews();
+    TOOL_DEFS.forEach(({ key }) => {
+      toolImages[key] = [];
+      renderToolPreviews(key);
+      setToolSectionVisible(key, false);
+    });
+    document.querySelectorAll('.tool-checkbox').forEach(cb => { cb.checked = false; });
     setDir('long');
     updatePreview();
   }
@@ -965,8 +1095,16 @@
     entryInput.value = t.entry;
     exitInput.value = t.exit;
     notesInput.value = t.notes || '';
-    formImages = (t.images || []).map(url => ({ path: pathFromPublicUrl(url), url }));
-    renderImagePreviews();
+    const usedSet = new Set(t.toolsUsed || []);
+    TOOL_DEFS.forEach(({ key }) => {
+      const urls = (t.images && t.images[key]) || [];
+      toolImages[key] = urls.map(url => ({ path: pathFromPublicUrl(url), url }));
+      renderToolPreviews(key);
+      const isUsed = usedSet.has(key) || urls.length > 0;
+      const cb = document.querySelector(`.tool-checkbox[data-tool="${key}"]`);
+      if (cb) cb.checked = isUsed;
+      setToolSectionVisible(key, isUsed);
+    });
     updatePreview();
     $('#formTitle').textContent = 'עריכת עסקה';
     $('#submitBtn').textContent = 'עדכן עסקה';
@@ -990,7 +1128,9 @@
       exit: Number(r.exit_price),
       points: Number(r.points),
       notes: r.notes || '',
-      images: r.image_urls || []
+      toolsUsed: r.tools_used || [],
+      images: r.images || {},
+      legacyImages: r.image_urls || []
     };
   }
 
@@ -1026,8 +1166,12 @@
       setSyncStatus('שגיאה במחיקה — בדוק חיבור', 'error');
       return;
     }
-    if (t && t.images && t.images.length){
-      const paths = t.images.map(pathFromPublicUrl).filter(Boolean);
+    if (t){
+      const allUrls = [
+        ...(t.legacyImages || []),
+        ...Object.values(t.images || {}).flat()
+      ];
+      const paths = allUrls.map(pathFromPublicUrl).filter(Boolean);
       if (paths.length) sb.storage.from('trade-images').remove(paths);
     }
     if (editingId === id){
