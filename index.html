@@ -500,6 +500,126 @@
     cursor:pointer;
   }
 
+  /* ---------- Trading coach chat ---------- */
+  .chat-fab{
+    position:fixed;
+    bottom:20px;
+    left:20px;
+    width:56px;
+    height:56px;
+    border-radius:50%;
+    background: var(--accent);
+    color:#0b0f1a;
+    border:none;
+    font-size:24px;
+    cursor:pointer;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    z-index:40;
+  }
+  .chat-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background: rgba(0,0,0,0.6);
+    z-index:55;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+  }
+  .chat-overlay.show{ display:flex; }
+  .chat-box{
+    background: var(--glass-bg-strong);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    width:100%;
+    max-width:640px;
+    height:85vh;
+    max-height:760px;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .chat-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid var(--border);
+    font-size:15px;
+    font-weight:700;
+  }
+  .chat-messages{
+    flex:1;
+    overflow-y:auto;
+    padding:16px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .chat-msg{
+    max-width:80%;
+    padding:10px 14px;
+    border-radius:14px;
+    font-size:14px;
+    line-height:1.6;
+    white-space:pre-wrap;
+  }
+  .chat-msg.user{
+    align-self:flex-end;
+    background: var(--accent);
+    color:#0b0f1a;
+    border-bottom-left-radius:4px;
+  }
+  .chat-msg.assistant{
+    align-self:flex-start;
+    background: rgba(255,255,255,0.08);
+    border:1px solid var(--border);
+    border-bottom-right-radius:4px;
+  }
+  .chat-msg.loading{
+    align-self:flex-start;
+    color: var(--text-dim);
+    font-size:13px;
+  }
+  .chat-input-row{
+    display:flex;
+    gap:8px;
+    padding:12px;
+    border-top:1px solid var(--border);
+  }
+  .chat-input-row textarea{
+    flex:1;
+    resize:none;
+    background: rgba(255,255,255,0.06);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px;
+    color: var(--text);
+    font-size:15px;
+    font-family:inherit;
+    max-height:100px;
+  }
+  .chat-input-row textarea:focus{
+    outline:none;
+    border-color: var(--accent);
+  }
+  .chat-send-btn{
+    padding:0 18px;
+    border-radius:10px;
+    border:none;
+    background: var(--accent);
+    color:#0b0f1a;
+    font-size:14px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .chat-send-btn:disabled{
+    opacity:0.5;
+    cursor:default;
+  }
+
   /* ---------- Image lightbox ---------- */
   .lightbox-overlay{
     display:none;
@@ -742,6 +862,22 @@
     </div>
   </div>
 
+  <button class="chat-fab" id="chatFab" type="button" title="מאמן המסחר">🧠</button>
+
+  <div class="chat-overlay" id="chatOverlay">
+    <div class="chat-box">
+      <div class="chat-header">
+        <span>מאמן המסחר</span>
+        <button class="modal-close" id="chatCloseBtn" type="button">✕</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <textarea id="chatInput" rows="1" placeholder="שאל את המאמן..."></textarea>
+        <button class="chat-send-btn" id="chatSendBtn" type="button">שלח</button>
+      </div>
+    </div>
+  </div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   const SUPABASE_URL = 'https://ioojflppnvfrcjzlhdvj.supabase.co';
@@ -881,7 +1017,8 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if ($('#lightboxOverlay').classList.contains('show')) closeLightbox();
-    else closeModal();
+    else if ($('#modalOverlay').classList.contains('show')) closeModal();
+    else if ($('#chatOverlay').classList.contains('show')) $('#chatOverlay').classList.remove('show');
   });
 
   $('#calGrid').addEventListener('click', (e) => {
@@ -1363,6 +1500,131 @@
     const d = parseLocal(dateStr);
     return d.toLocaleDateString('he-IL');
   }
+
+  // ---- trading coach chat ----
+  let chatHistory = [];
+
+  function buildTradesContext(){
+    if (trades.length === 0) return 'אין עדיין עסקאות ביומן.';
+
+    const total = trades.length;
+    const wins = trades.filter(t => t.points > 0);
+    const losses = trades.filter(t => t.points < 0);
+    const totalPts = trades.reduce((s,t) => s + t.points, 0);
+    const winRate = total ? (wins.length / total * 100).toFixed(1) : '0';
+    const avgWin = wins.length ? (wins.reduce((s,t) => s + t.points, 0) / wins.length).toFixed(2) : '0';
+    const avgLoss = losses.length ? (losses.reduce((s,t) => s + t.points, 0) / losses.length).toFixed(2) : '0';
+
+    let out = `סטטיסטיקה כללית:\nסה"כ עסקאות: ${total}\nניצחונות: ${wins.length} | הפסדים: ${losses.length}\nWin rate: ${winRate}%\nסה"כ נקודות: ${fmtPoints(totalPts)}\nממוצע רווח בעסקה מנצחת: ${avgWin}\nממוצע הפסד בעסקה מפסידה: ${avgLoss}\n\nסטטיסטיקה לפי כלי:\n`;
+
+    TOOL_DEFS.forEach(({ key, label }) => {
+      const withTool = trades.filter(t => (t.toolsUsed||[]).includes(key));
+      if (withTool.length === 0) return;
+      const toolWins = withTool.filter(t => t.points > 0).length;
+      const toolWinRate = (toolWins / withTool.length * 100).toFixed(1);
+      const toolPts = withTool.reduce((s,t) => s + t.points, 0);
+      out += `- ${label}: ${withTool.length} עסקאות, win rate ${toolWinRate}%, סה"כ ${fmtPoints(toolPts)} נקודות\n`;
+    });
+
+    out += '\nרשימת עסקאות (מהאחרונה לראשונה, עד 150):\n';
+    const sorted = trades.slice().sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id).slice(0, 150);
+    sorted.forEach(t => {
+      const toolsStr = (t.toolsUsed||[]).length
+        ? t.toolsUsed.map(k => (TOOL_DEFS.find(d => d.key === k)||{}).label || k).join(', ')
+        : 'לא צוין';
+      const notesStr = t.notes ? ` | הערות: ${t.notes.slice(0,200)}` : '';
+      out += `${t.date} | ${t.dir==='long'?'לונג':'שורט'} | כניסה ${t.entry} יציאה ${t.exit} | ${fmtPoints(t.points)} נק' | כלים: ${toolsStr}${notesStr}\n`;
+    });
+
+    return out;
+  }
+
+  function renderChatMessages(){
+    const container = $('#chatMessages');
+    container.innerHTML = '';
+    chatHistory.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + m.role;
+      div.textContent = m.content;
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function loadChatHistory(){
+    const { data, error } = await sb.from('chat_messages').select('*').order('created_at', { ascending: true });
+    if (error){ console.error(error); return; }
+    chatHistory = (data || []).map(r => ({ role: r.role, content: r.content }));
+    renderChatMessages();
+  }
+
+  async function sendChatMessage(){
+    const input = $('#chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const sendBtn = $('#chatSendBtn');
+    input.value = '';
+    input.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    chatHistory.push({ role: 'user', content: text });
+    renderChatMessages();
+    sb.from('chat_messages').insert({ role: 'user', content: text });
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'chat-msg loading';
+    loadingDiv.textContent = 'המאמן מקליד…';
+    $('#chatMessages').appendChild(loadingDiv);
+    $('#chatMessages').scrollTop = $('#chatMessages').scrollHeight;
+
+    try {
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradesContext: buildTradesContext(),
+          history: chatHistory.slice(-40)
+        })
+      });
+      const data = await res.json();
+      loadingDiv.remove();
+      if (!res.ok){
+        chatHistory.push({ role: 'assistant', content: data.error || 'שגיאה בשרת' });
+      } else {
+        chatHistory.push({ role: 'assistant', content: data.text });
+        sb.from('chat_messages').insert({ role: 'assistant', content: data.text });
+      }
+    } catch (err){
+      console.error(err);
+      loadingDiv.remove();
+      chatHistory.push({ role: 'assistant', content: 'שגיאת חיבור — נסה שוב' });
+    } finally {
+      sendBtn.disabled = false;
+      renderChatMessages();
+    }
+  }
+
+  $('#chatFab').addEventListener('click', async () => {
+    $('#chatOverlay').classList.add('show');
+    await loadChatHistory();
+  });
+  $('#chatCloseBtn').addEventListener('click', () => {
+    $('#chatOverlay').classList.remove('show');
+  });
+  $('#chatOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'chatOverlay') $('#chatOverlay').classList.remove('show');
+  });
+  $('#chatSendBtn').addEventListener('click', sendChatMessage);
+  $('#chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey){
+      e.preventDefault();
+      sendChatMessage();
+    }
+  });
+  $('#chatInput').addEventListener('input', (e) => {
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
+  });
 
   loadTrades();
 </script>
