@@ -55,7 +55,7 @@
   .app{
     max-width: 720px;
     margin: 0 auto;
-    padding: 16px 14px 60px;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 14px calc(60px + env(safe-area-inset-bottom, 0px));
     display:flex;
     flex-direction:column;
     gap:16px;
