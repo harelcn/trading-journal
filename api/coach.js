@@ -44,20 +44,21 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const response = await client.messages.create({
+    const response = await client.beta.messages.create({
       model: 'claude-opus-5',
       max_tokens: 4096,
+      betas: ['compact-2026-01-12'],
       system: `${SYSTEM_PROMPT}\n\n--- נתוני העסקאות המעודכנים ---\n${tradesContext || 'אין עדיין עסקאות.'}`,
-      messages: history.map(m => ({ role: m.role, content: m.content }))
+      messages: history.map(m => ({ role: m.role, content: m.content })),
+      context_management: { edits: [{ type: 'compact_20260112' }] }
     });
 
     if (response.stop_reason === 'refusal') {
-      res.status(200).json({ text: 'לא הצלחתי לענות על זה. נסה לנסח מחדש את השאלה.' });
+      res.status(200).json({ content: [{ type: 'text', text: 'לא הצלחתי לענות על זה. נסה לנסח מחדש את השאלה.' }] });
       return;
     }
 
-    const textBlock = response.content.find(b => b.type === 'text');
-    res.status(200).json({ text: textBlock ? textBlock.text : '' });
+    res.status(200).json({ content: response.content });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'שגיאה בשרת — נסה שוב' });
