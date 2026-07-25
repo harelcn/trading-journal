@@ -197,6 +197,41 @@
     gap:8px;
     margin-top:8px;
   }
+  .accordion{
+    border:1px solid var(--border);
+    border-radius:10px;
+    overflow:hidden;
+  }
+  .accordion-header{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background: rgba(255,255,255,0.04);
+    border:none;
+    padding:12px 14px;
+    color: var(--text);
+    font-size:14px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .accordion-arrow{
+    color: var(--text-dim);
+    transition: transform 0.15s ease;
+  }
+  .accordion-header.open .accordion-arrow{
+    transform: rotate(180deg);
+  }
+  .accordion-body{
+    display:none;
+    padding:14px;
+    border-top:1px solid var(--border);
+  }
+  .accordion-body.open{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
   .tool-checklist{
     display:flex;
     flex-direction:column;
@@ -742,7 +777,7 @@
     }
     .summary-card{ grid-area: summary; }
     .form-card{ grid-area: form; align-self:start; position:sticky; top:28px; }
-    .list-card{ grid-area: list; }
+    .list-card{ grid-area: list; align-self:start; }
     .summary{
       flex-direction:row;
     }
@@ -806,11 +841,6 @@
           <button type="button" data-dir="short">שורט</button>
         </div>
         <div class="field">
-          <label>כלים וסימונים שהשתמשתי בהם</label>
-          <div class="tool-checklist" id="toolChecklist"></div>
-        </div>
-        <div class="tool-shots" id="toolShots"></div>
-        <div class="field">
           <label for="tradeDate">תאריך</label>
           <input type="date" id="tradeDate" required>
         </div>
@@ -825,10 +855,28 @@
           </div>
         </div>
         <div class="preview" id="pointsPreview">נקודות: <b>—</b></div>
-        <div class="field">
-          <label for="tradeNotes">פירוט ההחלטה</label>
-          <textarea id="tradeNotes" rows="4" placeholder="תאר את כל תהליך העסקה..."></textarea>
+
+        <div class="accordion">
+          <button type="button" class="accordion-header" data-accordion="tools">
+            <span>כלים וסימונים שהשתמשתי בהם</span>
+            <span class="accordion-arrow">▾</span>
+          </button>
+          <div class="accordion-body" id="toolsAccordionBody">
+            <div class="tool-checklist" id="toolChecklist"></div>
+            <div class="tool-shots" id="toolShots"></div>
+          </div>
         </div>
+
+        <div class="accordion">
+          <button type="button" class="accordion-header" data-accordion="notes">
+            <span>פירוט ההחלטה</span>
+            <span class="accordion-arrow">▾</span>
+          </button>
+          <div class="accordion-body" id="notesAccordionBody">
+            <textarea id="tradeNotes" rows="4" placeholder="תאר את כל תהליך העסקה..."></textarea>
+          </div>
+        </div>
+
         <div class="form-actions">
           <button type="submit" class="submit-btn" id="submitBtn">הוסף עסקה</button>
           <button type="button" class="cancel-btn" id="cancelBtn">ביטול</button>
@@ -1004,6 +1052,22 @@
     });
   }
   buildToolUI();
+
+  // ---- form accordions ----
+  function setAccordionOpen(key, open){
+    const body = document.getElementById(key + 'AccordionBody');
+    const header = document.querySelector(`.accordion-header[data-accordion="${key}"]`);
+    if (!body || !header) return;
+    body.classList.toggle('open', open);
+    header.classList.toggle('open', open);
+  }
+  document.querySelectorAll('.accordion-header').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.accordion;
+      const isOpen = document.getElementById(key + 'AccordionBody').classList.contains('open');
+      setAccordionOpen(key, !isOpen);
+    });
+  });
 
   // ---- modal ----
   function openModal(title, contentNode){
@@ -1221,6 +1285,8 @@
       setToolSectionVisible(key, false);
     });
     document.querySelectorAll('.tool-checkbox').forEach(cb => { cb.checked = false; });
+    setAccordionOpen('tools', false);
+    setAccordionOpen('notes', false);
     setDir('long');
     updatePreview();
   }
@@ -1249,6 +1315,8 @@
       if (cb) cb.checked = isUsed;
       setToolSectionVisible(key, isUsed);
     });
+    setAccordionOpen('tools', usedSet.size > 0);
+    setAccordionOpen('notes', !!(t.notes && t.notes.trim()));
     updatePreview();
     $('#formTitle').textContent = 'עריכת עסקה';
     $('#submitBtn').textContent = 'עדכן עסקה';
