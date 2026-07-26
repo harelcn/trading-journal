@@ -77,6 +77,92 @@
   .sync-status.ok{ color: var(--green); }
   .sync-status.error{ color: var(--red); }
 
+  .account-bar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:12px;
+    color: var(--text-dim);
+    margin-bottom:6px;
+  }
+  .account-bar button{
+    background:none;
+    border:none;
+    color: var(--accent);
+    font-size:12px;
+    cursor:pointer;
+    text-decoration:underline;
+    padding:0;
+  }
+
+  .auth-overlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background: rgba(0,0,0,0.75);
+    z-index:100;
+    align-items:center;
+    justify-content:center;
+    padding:16px;
+  }
+  .auth-overlay.show{ display:flex; }
+  .auth-box{
+    background: var(--glass-bg-strong);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    max-width:360px;
+    width:100%;
+    padding:24px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .auth-title{
+    text-align:center;
+    font-size:18px;
+    font-weight:700;
+    margin:0;
+  }
+  .auth-tabs{
+    display:flex;
+    gap:8px;
+  }
+  .auth-tab{
+    flex:1;
+    padding:9px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-dim);
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .auth-tab.active{
+    background: rgba(110,168,255,0.18);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  #authForm{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+  }
+  .auth-error{
+    display:none;
+    font-size:12px;
+    color: var(--red);
+  }
+  .auth-error.show{ display:block; }
+  .auth-note{
+    display:none;
+    font-size:12px;
+    color: var(--green);
+  }
+  .auth-note.show{ display:block; }
+
   /* ---------- Summary bar ---------- */
   .summary{
     display:flex;
@@ -868,6 +954,10 @@
   <div class="app">
     <!-- Summary Bar -->
     <div class="card summary-card">
+      <div class="account-bar" id="accountBar">
+        <span id="accountEmail"></span>
+        <button type="button" id="logoutBtn">התנתק</button>
+      </div>
       <div class="sync-status" id="syncStatus">מתחבר לשרת…</div>
       <div class="summary">
         <div class="summary-row">
@@ -972,6 +1062,29 @@
       <div class="cal-grid" id="calGrid"></div>
     </div>
   </div>
+  </div>
+
+  <div class="auth-overlay" id="authOverlay">
+    <div class="auth-box">
+      <p class="auth-title">יומן מסחר</p>
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" data-mode="login">התחברות</button>
+        <button type="button" class="auth-tab" data-mode="signup">הרשמה</button>
+      </div>
+      <form id="authForm">
+        <div class="field">
+          <label for="authEmail">אימייל</label>
+          <input type="email" id="authEmail" required autocomplete="email">
+        </div>
+        <div class="field">
+          <label for="authPassword">סיסמה</label>
+          <input type="password" id="authPassword" required autocomplete="current-password" minlength="6">
+        </div>
+        <div class="auth-error" id="authError"></div>
+        <div class="auth-note" id="authNote"></div>
+        <button type="submit" class="submit-btn" id="authSubmitBtn">התחבר</button>
+      </form>
+    </div>
   </div>
 
   <div class="lightbox-overlay" id="lightboxOverlay">
@@ -1862,7 +1975,74 @@
     e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
   });
 
-  loadTrades();
+  // ---- auth ----
+  let authMode = 'login';
+  const authOverlay = $('#authOverlay');
+  const authForm = $('#authForm');
+  const authEmailInput = $('#authEmail');
+  const authPasswordInput = $('#authPassword');
+  const authErrorEl = $('#authError');
+  const authNoteEl = $('#authNote');
+  const authSubmitBtn = $('#authSubmitBtn');
+
+  function setAuthMode(mode){
+    authMode = mode;
+    document.querySelectorAll('.auth-tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    authSubmitBtn.textContent = mode === 'signup' ? 'הרשמה' : 'התחבר';
+    authPasswordInput.autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+    authErrorEl.classList.remove('show');
+    authNoteEl.classList.remove('show');
+  }
+  document.querySelectorAll('.auth-tab').forEach(btn => {
+    btn.addEventListener('click', () => setAuthMode(btn.dataset.mode));
+  });
+
+  authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    authErrorEl.classList.remove('show');
+    authNoteEl.classList.remove('show');
+    authSubmitBtn.disabled = true;
+    const email = authEmailInput.value.trim();
+    const password = authPasswordInput.value;
+
+    const { data, error } = authMode === 'signup'
+      ? await sb.auth.signUp({ email, password })
+      : await sb.auth.signInWithPassword({ email, password });
+
+    authSubmitBtn.disabled = false;
+
+    if (error){
+      authErrorEl.textContent = error.message;
+      authErrorEl.classList.add('show');
+      return;
+    }
+
+    if (authMode === 'signup' && !data.session){
+      authNoteEl.textContent = 'נשלח מייל אימות — אשר אותו כדי להתחבר.';
+      authNoteEl.classList.add('show');
+    }
+  });
+
+  $('#logoutBtn').addEventListener('click', async () => {
+    await sb.auth.signOut();
+  });
+
+  let appInited = false;
+  sb.auth.onAuthStateChange((event, session) => {
+    if (session && session.user){
+      authOverlay.classList.remove('show');
+      $('#accountEmail').textContent = session.user.email || '';
+      if (!appInited){
+        appInited = true;
+        loadTrades();
+      }
+    } else {
+      authOverlay.classList.add('show');
+      appInited = false;
+      trades = [];
+      render();
+    }
+  });
 </script>
 </body>
 </html>
