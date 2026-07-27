@@ -1503,7 +1503,7 @@
 
     if (error){
       console.error(error);
-      setSyncStatus('שגיאה בשמירה — בדוק חיבור', 'error');
+      setSyncStatus('שגיאה בשמירה: ' + (error.message || JSON.stringify(error)), 'error');
       return;
     }
 
