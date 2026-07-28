@@ -1017,6 +1017,12 @@
           <div class="confidence-desc" id="confidenceDesc"></div>
         </div>
 
+        <div class="tool-shot-section">
+          <div class="tool-shot-title">תמונה כללית של העסקה</div>
+          <input type="file" accept="image/*" multiple class="tool-shot-input" id="generalImageInput">
+          <div class="image-previews" data-tool-preview="general"></div>
+        </div>
+
         <div class="accordion">
           <button type="button" class="accordion-header" data-accordion="tools">
             <span>כלים וסימונים שהשתמשתי בהם</span>
@@ -1144,8 +1150,9 @@
     { key: 'ote', label: 'OTE' },
     { key: 'ledge', label: 'Ledge' }
   ];
-  let toolImages = {}; // { smt: [{path,url}], print: [...], ... }
+  let toolImages = {}; // { smt: [{path,url}], print: [...], general: [...], ... }
   TOOL_DEFS.forEach(t => { toolImages[t.key] = []; });
+  toolImages.general = [];
 
   const CONFIDENCE_DEFS = [
     { v: 5, desc: 'SMT חזק באינטרוול גבוה (4 שעות), MNQ יצר את הפער, פרינט תומך, VP30% בכיוון, אין דשדוש, ריטסט ל-OTE עם דחייה ברורה. הכל התיישר.' },
@@ -1246,6 +1253,19 @@
     });
   }
   buildToolUI();
+
+  $('#generalImageInput').addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    setSyncStatus('מעלה תמונות…', 'loading');
+    for (const file of files){
+      const uploaded = await uploadImageFile(file);
+      if (uploaded) toolImages.general.push(uploaded);
+    }
+    renderToolPreviews('general');
+    setSyncStatus('מסונכרן ✓', 'ok');
+  });
 
   function buildConfidenceUI(){
     const wrap = $('#confidencePicker');
@@ -1356,6 +1376,11 @@
       ? `<div class="detail-tools">${usedLabels.map(l=>`<span class="detail-tool-chip">${l}</span>`).join('')}</div>`
       : '';
 
+    const generalUrls = (t.images && t.images.general) || [];
+    const generalImagesHtml = generalUrls.length
+      ? `<div class="detail-tool-group"><div class="detail-label">תמונה כללית</div><div class="detail-images">${generalUrls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div></div>`
+      : '';
+
     let toolImagesHtml = '';
     TOOL_DEFS.forEach(({ key, label }) => {
       const urls = (t.images && t.images[key]) || [];
@@ -1366,7 +1391,7 @@
           <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
         </div>`;
     });
-    const hasStructuredImages = toolImagesHtml.length > 0;
+    const hasStructuredImages = generalImagesHtml.length > 0 || toolImagesHtml.length > 0;
     const legacyImagesHtml = (!hasStructuredImages && (t.legacyImages||[]).length)
       ? `<div class="detail-tool-group"><div class="detail-label">תמונות</div><div class="detail-images">${t.legacyImages.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div></div>`
       : '';
@@ -1380,6 +1405,7 @@
       ${t.confidence ? `<div class="detail-row"><span class="detail-label">דירוג ביטחון</span><span class="confidence-badge">${t.confidence}/5</span></div>` : ''}
       ${checklistHtml}
       ${t.notes ? `<div class="detail-notes"><span class="detail-label">פירוט ההחלטה</span><div class="detail-notes-text">${escapeHtml(t.notes)}</div></div>` : ''}
+      ${generalImagesHtml}
       ${toolImagesHtml}
       ${legacyImagesHtml}
     `;
@@ -1482,6 +1508,7 @@
     TOOL_DEFS.forEach(({ key }) => {
       if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
     });
+    if (toolImages.general.length) images.general = toolImages.general.map(img => img.url);
     const payload = {
       dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points,
       notes: notesInput.value.trim(),
@@ -1527,6 +1554,8 @@
       renderToolPreviews(key);
       setToolSectionVisible(key, false);
     });
+    toolImages.general = [];
+    renderToolPreviews('general');
     document.querySelectorAll('.tool-checkbox').forEach(cb => { cb.checked = false; });
     setAccordionOpen('tools', false);
     setAccordionOpen('notes', false);
@@ -1560,6 +1589,9 @@
       if (cb) cb.checked = isUsed;
       setToolSectionVisible(key, isUsed);
     });
+    const generalUrls = (t.images && t.images.general) || [];
+    toolImages.general = generalUrls.map(url => ({ path: pathFromPublicUrl(url), url }));
+    renderToolPreviews('general');
     setAccordionOpen('tools', usedSet.size > 0);
     setAccordionOpen('notes', !!(t.notes && t.notes.trim()));
     setConfidence(t.confidence || null);
@@ -1901,6 +1933,7 @@
     const sorted = trades.slice().sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id);
     const out = [];
     sorted.forEach(t => {
+      ((t.images && t.images.general) || []).forEach(url => out.push({ url, date: t.date, label: 'תמונה כללית' }));
       TOOL_DEFS.forEach(({ key, label }) => {
         ((t.images && t.images[key]) || []).forEach(url => out.push({ url, date: t.date, label }));
       });
