@@ -423,6 +423,22 @@
     color: var(--accent);
     margin-bottom:8px;
   }
+  .drop-zone{
+    border:2px dashed var(--border);
+    border-radius:10px;
+    padding:16px;
+    text-align:center;
+    cursor:pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .drop-zone:hover, .drop-zone.dragover{
+    border-color: var(--accent);
+    background: rgba(110,168,255,0.08);
+  }
+  .drop-zone-text{
+    font-size:13px;
+    color: var(--text-dim);
+  }
   .img-preview{
     position:relative;
     width:64px;
@@ -1019,7 +1035,10 @@
 
         <div class="tool-shot-section">
           <div class="tool-shot-title">תמונה כללית של העסקה</div>
-          <input type="file" accept="image/*" multiple class="tool-shot-input" id="generalImageInput">
+          <div class="drop-zone" id="generalDropZone">
+            <span class="drop-zone-text">גרור תמונה לכאן או לחץ להעלאה</span>
+            <input type="file" accept="image/*" multiple class="tool-shot-input" id="generalImageInput" hidden>
+          </div>
           <div class="image-previews" data-tool-preview="general"></div>
         </div>
 
@@ -1209,6 +1228,28 @@
     });
   }
 
+  function setupDropZone(zone, input, onFiles){
+    zone.addEventListener('click', () => input.click());
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', () => {
+      zone.classList.remove('dragover');
+    });
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.classList.remove('dragover');
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+      if (files.length) onFiles(files);
+    });
+    input.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (files.length) onFiles(files);
+    });
+  }
+
   function setToolSectionVisible(tool, visible){
     const section = document.querySelector(`.tool-shot-section[data-tool="${tool}"]`);
     if (section) section.style.display = visible ? 'block' : 'none';
@@ -1234,30 +1275,31 @@
       section.style.display = 'none';
       section.innerHTML = `
         <div class="tool-shot-title">${label}</div>
-        <input type="file" accept="image/*" multiple class="tool-shot-input" data-tool="${key}">
+        <div class="drop-zone" data-tool-dropzone="${key}">
+          <span class="drop-zone-text">גרור תמונה לכאן או לחץ להעלאה</span>
+          <input type="file" accept="image/*" multiple class="tool-shot-input" data-tool="${key}" hidden>
+        </div>
         <div class="image-previews" data-tool-preview="${key}"></div>
       `;
-      section.querySelector('.tool-shot-input').addEventListener('change', async (e) => {
-        const files = Array.from(e.target.files || []);
-        e.target.value = '';
-        if (files.length === 0) return;
-        setSyncStatus('מעלה תמונות…', 'loading');
-        for (const file of files){
-          const uploaded = await uploadImageFile(file);
-          if (uploaded) toolImages[key].push(uploaded);
+      setupDropZone(
+        section.querySelector('.drop-zone'),
+        section.querySelector('.tool-shot-input'),
+        async (files) => {
+          setSyncStatus('מעלה תמונות…', 'loading');
+          for (const file of files){
+            const uploaded = await uploadImageFile(file);
+            if (uploaded) toolImages[key].push(uploaded);
+          }
+          renderToolPreviews(key);
+          setSyncStatus('מסונכרן ✓', 'ok');
         }
-        renderToolPreviews(key);
-        setSyncStatus('מסונכרן ✓', 'ok');
-      });
+      );
       shots.appendChild(section);
     });
   }
   buildToolUI();
 
-  $('#generalImageInput').addEventListener('change', async (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (files.length === 0) return;
+  setupDropZone($('#generalDropZone'), $('#generalImageInput'), async (files) => {
     setSyncStatus('מעלה תמונות…', 'loading');
     for (const file of files){
       const uploaded = await uploadImageFile(file);
