@@ -1879,9 +1879,34 @@
   function chatMessageText(content){
     if (typeof content === 'string') return content;
     if (Array.isArray(content)){
-      return content.filter(b => b.type === 'text').map(b => b.text).join('\n\n');
+      const first = content.find(b => b.type === 'text');
+      return first ? first.text : '';
     }
     return '';
+  }
+
+  function getAlreadySentImageUrls(){
+    const sent = new Set();
+    chatHistory.forEach(m => {
+      if (Array.isArray(m.content)){
+        m.content.forEach(b => {
+          if (b.type === 'image' && b.source && b.source.url) sent.add(b.source.url);
+        });
+      }
+    });
+    return sent;
+  }
+
+  function collectAllTradeImages(){
+    const sorted = trades.slice().sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id);
+    const out = [];
+    sorted.forEach(t => {
+      TOOL_DEFS.forEach(({ key, label }) => {
+        ((t.images && t.images[key]) || []).forEach(url => out.push({ url, date: t.date, label }));
+      });
+      (t.legacyImages || []).forEach(url => out.push({ url, date: t.date, label: 'תמונה' }));
+    });
+    return out;
   }
 
   function renderChatMessages(){
@@ -1914,9 +1939,21 @@
     input.style.height = 'auto';
     sendBtn.disabled = true;
 
-    chatHistory.push({ role: 'user', content: text });
+    const alreadySent = getAlreadySentImageUrls();
+    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 12);
+
+    let outgoingContent = text;
+    if (newImages.length){
+      outgoingContent = [{ type: 'text', text }];
+      newImages.forEach(img => {
+        outgoingContent.push({ type: 'text', text: `צילום מסך מעסקת ${img.date} (${img.label}):` });
+        outgoingContent.push({ type: 'image', source: { type: 'url', url: img.url } });
+      });
+    }
+
+    chatHistory.push({ role: 'user', content: outgoingContent });
     renderChatMessages();
-    await sb.from('chat_messages').insert({ role: 'user', content: text });
+    await sb.from('chat_messages').insert({ role: 'user', content: outgoingContent });
 
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-msg loading';
