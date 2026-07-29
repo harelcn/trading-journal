@@ -197,23 +197,42 @@
   .zero{ color: var(--text); }
 
   /* ---------- Form ---------- */
-  #coachSpaceContent{
+  .coach-space-btn{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background: rgba(110,168,255,0.06);
+    border:1px solid var(--accent);
+    border-radius:10px;
+    padding:14px 16px;
+    color: var(--text);
+    font-size:14px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .coach-space-status{
+    font-size:12px;
+    font-weight:600;
+    color: var(--text-dim);
+  }
+  .coach-space-render{
     font-size:14px;
     line-height:1.6;
     color: var(--text);
   }
-  #coachSpaceContent h1, #coachSpaceContent h2, #coachSpaceContent h3, #coachSpaceContent h4{
+  .coach-space-render h1, .coach-space-render h2, .coach-space-render h3, .coach-space-render h4{
     font-size:15px;
     margin:12px 0 6px;
     color: var(--accent);
   }
-  #coachSpaceContent h1:first-child, #coachSpaceContent h2:first-child, #coachSpaceContent h3:first-child{
+  .coach-space-render h1:first-child, .coach-space-render h2:first-child, .coach-space-render h3:first-child{
     margin-top:0;
   }
-  #coachSpaceContent p{ margin:6px 0; }
-  #coachSpaceContent ul, #coachSpaceContent ol{ margin:6px 0; padding-inline-start:20px; }
-  #coachSpaceContent table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:13px; }
-  #coachSpaceContent th, #coachSpaceContent td{ border:1px solid var(--border); padding:6px 8px; text-align:right; }
+  .coach-space-render p{ margin:6px 0; }
+  .coach-space-render ul, .coach-space-render ol{ margin:6px 0; padding-inline-start:20px; }
+  .coach-space-render table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:13px; }
+  .coach-space-render th, .coach-space-render td{ border:1px solid var(--border); padding:6px 8px; text-align:right; }
   .coach-space-empty{
     color: var(--text-dim);
     font-size:13px;
@@ -1030,10 +1049,10 @@
 
     <!-- Coach's Personal Space -->
     <div class="card coach-space-card">
-      <p class="form-title">האזור האישי של המאמן</p>
-      <div id="coachSpaceContent">
-        <p class="coach-space-empty">המאמן עוד לא כתב כאן כלום — תבקש ממנו בצ׳אט.</p>
-      </div>
+      <button type="button" class="coach-space-btn" id="coachSpaceBtn">
+        <span>האזור האישי של המאמן</span>
+        <span class="coach-space-status" id="coachSpaceStatus">ריק</span>
+      </button>
     </div>
 
     <!-- Add Trade Form -->
@@ -2009,20 +2028,28 @@
       .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
   }
 
+  const COACH_SPACE_EMPTY_HTML = '<p class="coach-space-empty">המאמן עוד לא כתב כאן כלום — תבקש ממנו בצ׳אט.</p>';
+
   function renderCoachSpace(html){
-    const el = $('#coachSpaceContent');
-    if (!html){
-      el.innerHTML = '<p class="coach-space-empty">המאמן עוד לא כתב כאן כלום — תבקש ממנו בצ׳אט.</p>';
-      return;
-    }
-    el.innerHTML = html;
+    coachSpaceHtml = html || '';
+    const statusEl = $('#coachSpaceStatus');
+    if (statusEl) statusEl.textContent = coachSpaceHtml ? 'יש תוכן ✓' : 'ריק';
+    const modalContent = document.getElementById('coachSpaceModalContent');
+    if (modalContent) modalContent.innerHTML = coachSpaceHtml || COACH_SPACE_EMPTY_HTML;
   }
+
+  $('#coachSpaceBtn').addEventListener('click', () => {
+    const wrap = document.createElement('div');
+    wrap.id = 'coachSpaceModalContent';
+    wrap.className = 'coach-space-render';
+    wrap.innerHTML = coachSpaceHtml || COACH_SPACE_EMPTY_HTML;
+    openModal('האזור האישי של המאמן', wrap);
+  });
 
   async function loadCoachSpace(){
     const { data, error } = await sb.from('coach_space').select('content').eq('user_id', currentUserId).maybeSingle();
     if (error){ console.error(error); return; }
-    coachSpaceHtml = (data && data.content) || '';
-    renderCoachSpace(coachSpaceHtml);
+    renderCoachSpace((data && data.content) || '');
   }
 
   async function saveCoachSpace(html){
@@ -2030,7 +2057,6 @@
     const { error } = await sb.from('coach_space')
       .upsert({ user_id: currentUserId, content: clean, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     if (error){ console.error(error); return; }
-    coachSpaceHtml = clean;
     renderCoachSpace(clean);
   }
 
