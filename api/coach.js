@@ -80,7 +80,7 @@ module.exports = async (req, res) => {
       iterations++;
       response = await client.beta.messages.create({
         model: 'claude-opus-5',
-        max_tokens: 4096,
+        max_tokens: 8000,
         betas: ['compact-2026-01-12'],
         system,
         messages,
@@ -94,11 +94,11 @@ module.exports = async (req, res) => {
       messages.push({ role: 'assistant', content: response.content });
 
       const toolResults = toolUseBlocks.map(tool => {
-        if (tool.name === 'update_personal_space' && tool.input && typeof tool.input.html === 'string'){
+        if (tool.name === 'update_personal_space' && tool.input && typeof tool.input.html === 'string' && tool.input.html.trim()){
           spaceUpdate = tool.input.html;
           return { type: 'tool_result', tool_use_id: tool.id, content: 'נשמר בהצלחה. האזור האישי עודכן.' };
         }
-        return { type: 'tool_result', tool_use_id: tool.id, content: 'שגיאה: כלי לא מוכר', is_error: true };
+        return { type: 'tool_result', tool_use_id: tool.id, content: 'שגיאה: לא התקבל תוכן html תקין. נסה שוב עם הפרמטר html מלא.', is_error: true };
       });
 
       messages.push({ role: 'user', content: toolResults });
@@ -106,6 +106,18 @@ module.exports = async (req, res) => {
 
     if (response.stop_reason === 'refusal') {
       res.status(200).json({ content: [{ type: 'text', text: 'לא הצלחתי לענות על זה. נסה לנסח מחדש את השאלה.' }] });
+      return;
+    }
+
+    // Never let a dangling tool_use block (unresolved after all iterations) reach
+    // the client — it would get persisted to chat_messages and break every future
+    // request, since the full history is replayed on each call and the API rejects
+    // any tool_use without an immediately-following tool_result.
+    if (response.stop_reason === 'tool_use') {
+      res.status(200).json({
+        content: [{ type: 'text', text: 'המאמן לא הצליח לסיים את העדכון הפעם — נסה שוב.' }],
+        spaceUpdate
+      });
       return;
     }
 
