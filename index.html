@@ -2003,22 +2003,13 @@
     return out;
   }
 
-  const COACH_SPACE_RE = /\[\[\[COACH_SPACE\]\]\]([\s\S]*?)\[\[\[\/COACH_SPACE\]\]\]/;
-
   function chatMessageText(content){
-    let text = '';
-    if (typeof content === 'string') text = content;
-    else if (Array.isArray(content)){
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)){
       const first = content.find(b => b.type === 'text');
-      text = first ? first.text : '';
+      return first ? first.text : '';
     }
-    if (!text) return text;
-    const match = text.match(COACH_SPACE_RE);
-    if (match){
-      text = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
-      if (!text) text = 'עדכנתי את האזור האישי שלך ✅';
-    }
-    return text;
+    return '';
   }
 
   function sanitizeCoachSpaceHtml(html){
@@ -2157,9 +2148,7 @@
         chatHistory.push({ role: 'assistant', content: data.content });
         await sb.from('chat_messages').insert({ role: 'assistant', content: data.content });
 
-        const replyText = (Array.isArray(data.content) ? (data.content.find(b => b.type === 'text') || {}).text : '') || '';
-        const spaceMatch = replyText.match(COACH_SPACE_RE);
-        if (spaceMatch) await saveCoachSpace(spaceMatch[1].trim());
+        if (data.spaceUpdate) await saveCoachSpace(data.spaceUpdate);
       }
     } catch (err){
       console.error(err);
