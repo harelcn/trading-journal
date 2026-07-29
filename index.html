@@ -197,6 +197,29 @@
   .zero{ color: var(--text); }
 
   /* ---------- Form ---------- */
+  #coachSpaceContent{
+    font-size:14px;
+    line-height:1.6;
+    color: var(--text);
+  }
+  #coachSpaceContent h1, #coachSpaceContent h2, #coachSpaceContent h3, #coachSpaceContent h4{
+    font-size:15px;
+    margin:12px 0 6px;
+    color: var(--accent);
+  }
+  #coachSpaceContent h1:first-child, #coachSpaceContent h2:first-child, #coachSpaceContent h3:first-child{
+    margin-top:0;
+  }
+  #coachSpaceContent p{ margin:6px 0; }
+  #coachSpaceContent ul, #coachSpaceContent ol{ margin:6px 0; padding-inline-start:20px; }
+  #coachSpaceContent table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:13px; }
+  #coachSpaceContent th, #coachSpaceContent td{ border:1px solid var(--border); padding:6px 8px; text-align:right; }
+  .coach-space-empty{
+    color: var(--text-dim);
+    font-size:13px;
+    text-align:center;
+    padding:12px 0;
+  }
   .form-title{
     font-size:15px;
     font-weight:600;
@@ -938,11 +961,13 @@
       grid-template-columns: 380px 1fr;
       grid-template-areas:
         "summary summary"
+        "coach coach"
         "form list";
       gap:20px;
       padding: 28px 32px 60px;
     }
     .summary-card{ grid-area: summary; }
+    .coach-space-card{ grid-area: coach; }
     .form-card{ grid-area: form; align-self:start; position:sticky; top:28px; }
     .list-card{ grid-area: list; align-self:start; }
     .summary{
@@ -1000,6 +1025,14 @@
             <div class="value" id="countTotal">0</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Coach's Personal Space -->
+    <div class="card coach-space-card">
+      <p class="form-title">האזור האישי של המאמן</p>
+      <div id="coachSpaceContent">
+        <p class="coach-space-empty">המאמן עוד לא כתב כאן כלום — תבקש ממנו בצ׳אט.</p>
       </div>
     </div>
 
@@ -1182,6 +1215,7 @@
   ];
   let currentConfidence = null;
   let openConfidenceInfo = null;
+  let coachSpaceHtml = '';
 
   function pad2(n){ return String(n).padStart(2, '0'); }
   function dateToISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
@@ -1950,13 +1984,54 @@
     return out;
   }
 
+  const COACH_SPACE_RE = /\[\[\[COACH_SPACE\]\]\]([\s\S]*?)\[\[\[\/COACH_SPACE\]\]\]/;
+
   function chatMessageText(content){
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)){
+    let text = '';
+    if (typeof content === 'string') text = content;
+    else if (Array.isArray(content)){
       const first = content.find(b => b.type === 'text');
-      return first ? first.text : '';
+      text = first ? first.text : '';
     }
-    return '';
+    if (!text) return text;
+    const match = text.match(COACH_SPACE_RE);
+    if (match){
+      text = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+      if (!text) text = 'עדכנתי את האזור האישי שלך ✅';
+    }
+    return text;
+  }
+
+  function sanitizeCoachSpaceHtml(html){
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+      .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
+  }
+
+  function renderCoachSpace(html){
+    const el = $('#coachSpaceContent');
+    if (!html){
+      el.innerHTML = '<p class="coach-space-empty">המאמן עוד לא כתב כאן כלום — תבקש ממנו בצ׳אט.</p>';
+      return;
+    }
+    el.innerHTML = html;
+  }
+
+  async function loadCoachSpace(){
+    const { data, error } = await sb.from('coach_space').select('content').eq('user_id', currentUserId).maybeSingle();
+    if (error){ console.error(error); return; }
+    coachSpaceHtml = (data && data.content) || '';
+    renderCoachSpace(coachSpaceHtml);
+  }
+
+  async function saveCoachSpace(html){
+    const clean = sanitizeCoachSpaceHtml(html);
+    const { error } = await sb.from('coach_space')
+      .upsert({ user_id: currentUserId, content: clean, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    if (error){ console.error(error); return; }
+    coachSpaceHtml = clean;
+    renderCoachSpace(clean);
   }
 
   function getAlreadySentImageUrls(){
@@ -2042,6 +2117,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tradesContext: buildTradesContext(),
+          coachSpaceContent: coachSpaceHtml,
           history: chatHistory
         })
       });
@@ -2054,6 +2130,10 @@
         // and thinking blocks replay correctly on the next turn
         chatHistory.push({ role: 'assistant', content: data.content });
         await sb.from('chat_messages').insert({ role: 'assistant', content: data.content });
+
+        const replyText = (Array.isArray(data.content) ? (data.content.find(b => b.type === 'text') || {}).text : '') || '';
+        const spaceMatch = replyText.match(COACH_SPACE_RE);
+        if (spaceMatch) await saveCoachSpace(spaceMatch[1].trim());
       }
     } catch (err){
       console.error(err);
@@ -2140,19 +2220,24 @@
   });
 
   let appInited = false;
+  let currentUserId = null;
   sb.auth.onAuthStateChange((event, session) => {
     if (session && session.user){
+      currentUserId = session.user.id;
       authOverlay.classList.remove('show');
       $('#accountEmail').textContent = session.user.email || '';
       if (!appInited){
         appInited = true;
         loadTrades();
+        loadCoachSpace();
       }
     } else {
+      currentUserId = null;
       authOverlay.classList.add('show');
       appInited = false;
       trades = [];
       render();
+      renderCoachSpace('');
     }
   });
 </script>
