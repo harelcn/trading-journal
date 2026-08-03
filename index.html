@@ -2036,7 +2036,7 @@
     sendBtn.disabled = true;
 
     const alreadySent = getAlreadySentImageUrls();
-    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 3);
+    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 1);
 
     let outgoingContent = text;
     if (newImages.length){
@@ -2063,7 +2063,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tradesContext: buildTradesContext(),
-          history: trimHistoryImages(chatHistory, 6)
+          history: trimHistoryImages(chatHistory, 1)
         })
       });
       const data = await res.json();
