@@ -2005,21 +2005,50 @@
     renderChatMessages();
   }
 
-  function trimHistoryImages(history, maxImages){
-    let totalImages = 0;
-    history.forEach(m => {
-      if (Array.isArray(m.content)) totalImages += m.content.filter(b => b.type === 'image').length;
-    });
-    if (totalImages <= maxImages) return history;
-
-    let toDrop = totalImages - maxImages;
-    return history.map(m => {
-      if (!Array.isArray(m.content)) return m;
-      const newContent = m.content.map(b => {
-        if (b.type === 'image' && toDrop > 0){
-          toDrop--;
-          return { type: 'text', text: '[תמונה ישנה הוסרה מההקשר כדי לא לחרוג ממגבלת התמונות]' };
+  function resizeImageForApi(url, maxDim){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim){
+          const scale = maxDim / Math.max(width, height);
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
         }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        resolve({ media_type: 'image/jpeg', data: dataUrl.split(',')[1] });
+      };
+      img.onerror = () => reject(new Error('image load failed'));
+      img.src = url;
+    });
+  }
+
+  // Old messages may still hold un-resized `type:'url'` image blocks (Claude fetches
+  // the original file, which can exceed the API's size limit) — strip those
+  // permanently. Newer messages hold already-resized `type:'base64'` blocks, which are
+  // safe; just cap how many of those get replayed.
+  function trimHistoryImages(history, maxBase64Images){
+    const base64Positions = [];
+    history.forEach((m, mi) => {
+      if (Array.isArray(m.content)){
+        m.content.forEach((b, bi) => {
+          if (b.type === 'image' && b.source && b.source.type === 'base64') base64Positions.push(`${mi}:${bi}`);
+        });
+      }
+    });
+    const keepSet = new Set(base64Positions.slice(-maxBase64Images));
+
+    return history.map((m, mi) => {
+      if (!Array.isArray(m.content)) return m;
+      const newContent = m.content.map((b, bi) => {
+        if (b.type !== 'image') return b;
+        if (b.source && b.source.type === 'url') return { type: 'text', text: '[תמונה ישנה לא נתמכת יותר בהקשר]' };
+        if (b.source && b.source.type === 'base64' && !keepSet.has(`${mi}:${bi}`)) return { type: 'text', text: '[תמונה ישנה הוסרה מההקשר]' };
         return b;
       });
       return { role: m.role, content: newContent };
@@ -2036,15 +2065,20 @@
     sendBtn.disabled = true;
 
     const alreadySent = getAlreadySentImageUrls();
-    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 1);
+    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 3);
 
     let outgoingContent = text;
     if (newImages.length){
       outgoingContent = [{ type: 'text', text }];
-      newImages.forEach(img => {
-        outgoingContent.push({ type: 'text', text: `צילום מסך מעסקת ${img.date} (${img.label}):` });
-        outgoingContent.push({ type: 'image', source: { type: 'url', url: img.url } });
-      });
+      for (const img of newImages){
+        try {
+          const resized = await resizeImageForApi(img.url, 1568);
+          outgoingContent.push({ type: 'text', text: `צילום מסך מעסקת ${img.date} (${img.label}):` });
+          outgoingContent.push({ type: 'image', source: { type: 'base64', media_type: resized.media_type, data: resized.data } });
+        } catch (e){
+          console.error('image resize failed', e);
+        }
+      }
     }
 
     chatHistory.push({ role: 'user', content: outgoingContent });
