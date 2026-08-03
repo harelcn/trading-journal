@@ -2005,6 +2005,27 @@
     renderChatMessages();
   }
 
+  function trimHistoryImages(history, maxImages){
+    let totalImages = 0;
+    history.forEach(m => {
+      if (Array.isArray(m.content)) totalImages += m.content.filter(b => b.type === 'image').length;
+    });
+    if (totalImages <= maxImages) return history;
+
+    let toDrop = totalImages - maxImages;
+    return history.map(m => {
+      if (!Array.isArray(m.content)) return m;
+      const newContent = m.content.map(b => {
+        if (b.type === 'image' && toDrop > 0){
+          toDrop--;
+          return { type: 'text', text: '[תמונה ישנה הוסרה מההקשר כדי לא לחרוג ממגבלת התמונות]' };
+        }
+        return b;
+      });
+      return { role: m.role, content: newContent };
+    });
+  }
+
   async function sendChatMessage(){
     const input = $('#chatInput');
     const text = input.value.trim();
@@ -2015,7 +2036,7 @@
     sendBtn.disabled = true;
 
     const alreadySent = getAlreadySentImageUrls();
-    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 12);
+    const newImages = collectAllTradeImages().filter(img => !alreadySent.has(img.url)).slice(0, 3);
 
     let outgoingContent = text;
     if (newImages.length){
@@ -2042,7 +2063,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tradesContext: buildTradesContext(),
-          history: chatHistory
+          history: trimHistoryImages(chatHistory, 6)
         })
       });
       const data = await res.json();
