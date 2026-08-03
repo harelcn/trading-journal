@@ -2020,7 +2020,7 @@
         canvas.width = width;
         canvas.height = height;
         canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         resolve({ media_type: 'image/jpeg', data: dataUrl.split(',')[1] });
       };
       img.onerror = () => reject(new Error('image load failed'));
@@ -2072,7 +2072,7 @@
       outgoingContent = [{ type: 'text', text }];
       for (const img of newImages){
         try {
-          const resized = await resizeImageForApi(img.url, 1568);
+          const resized = await resizeImageForApi(img.url, 1024);
           outgoingContent.push({ type: 'text', text: `צילום מסך מעסקת ${img.date} (${img.label}):` });
           outgoingContent.push({ type: 'image', source: { type: 'base64', media_type: resized.media_type, data: resized.data } });
         } catch (e){
@@ -2083,7 +2083,14 @@
 
     chatHistory.push({ role: 'user', content: outgoingContent });
     renderChatMessages();
-    await sb.from('chat_messages').insert({ role: 'user', content: outgoingContent });
+    const { error: insertErr } = await sb.from('chat_messages').insert({ role: 'user', content: outgoingContent });
+    if (insertErr){
+      console.error(insertErr);
+      chatHistory.push({ role: 'assistant', content: 'שגיאה בשמירת ההודעה: ' + (insertErr.message || JSON.stringify(insertErr)) });
+      renderChatMessages();
+      sendBtn.disabled = false;
+      return;
+    }
 
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-msg loading';
