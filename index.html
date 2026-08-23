@@ -1255,6 +1255,21 @@
     </div>
   </div>
 
+  <div class="auth-overlay" id="nameGateOverlay">
+    <div class="auth-box">
+      <p class="auth-title">איך נקרא לך?</p>
+      <p style="text-align:center; color:var(--text-dim); font-size:13px; margin:-4px 0 4px;">השם הזה יוצג לחברי הקבוצה שלך</p>
+      <form id="nameGateForm">
+        <div class="field">
+          <label for="nameGateInput">שם תצוגה</label>
+          <input type="text" id="nameGateInput" required maxlength="40" autocomplete="nickname">
+        </div>
+        <div class="auth-error" id="nameGateError"></div>
+        <button type="submit" class="submit-btn" id="nameGateSubmitBtn">שמור והמשך</button>
+      </form>
+    </div>
+  </div>
+
   <div class="lightbox-overlay" id="lightboxOverlay">
     <img id="lightboxImg" src="" alt="">
   </div>
@@ -2555,6 +2570,43 @@
     await sb.auth.signOut();
   });
 
+  let displayName = null;
+
+  async function ensureDisplayName(){
+    const { data, error } = await sb.from('profiles').select('display_name').eq('user_id', currentUserId).maybeSingle();
+    if (error){ console.error(error); return; }
+    if (data && data.display_name){
+      displayName = data.display_name;
+      return;
+    }
+    await new Promise((resolve) => {
+      const overlay = $('#nameGateOverlay');
+      overlay.classList.add('show');
+      const form = $('#nameGateForm');
+      const input = $('#nameGateInput');
+      const errEl = $('#nameGateError');
+      const submitBtn = $('#nameGateSubmitBtn');
+      const handler = async (e) => {
+        e.preventDefault();
+        const name = input.value.trim();
+        if (!name) return;
+        submitBtn.disabled = true;
+        errEl.textContent = '';
+        const { error: saveErr } = await sb.from('profiles').insert({ display_name: name });
+        submitBtn.disabled = false;
+        if (saveErr){
+          errEl.textContent = saveErr.message || 'שגיאה בשמירה';
+          return;
+        }
+        displayName = name;
+        overlay.classList.remove('show');
+        form.removeEventListener('submit', handler);
+        resolve();
+      };
+      form.addEventListener('submit', handler);
+    });
+  }
+
   let appInited = false;
   let currentUserId = null;
   let currentUserEmail = null;
@@ -2566,12 +2618,17 @@
       $('#accountEmail').textContent = session.user.email || '';
       if (!appInited){
         appInited = true;
-        loadTrades();
-        loadGroups();
+        (async () => {
+          await ensureDisplayName();
+          loadTrades();
+          loadGroups();
+        })();
       }
     } else {
       currentUserId = null;
       currentUserEmail = null;
+      displayName = null;
+      $('#nameGateOverlay').classList.remove('show');
       authOverlay.classList.add('show');
       appInited = false;
       trades = [];
