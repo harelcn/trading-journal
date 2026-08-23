@@ -196,6 +196,139 @@
   .neg{ color: var(--red); }
   .zero{ color: var(--text); }
 
+  /* ---------- Group ---------- */
+  .group-btn{
+    width:100%;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    background: rgba(110,168,255,0.06);
+    border:1px solid var(--accent);
+    border-radius:10px;
+    padding:14px 16px;
+    color: var(--text);
+    font-size:14px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .group-status{
+    font-size:12px;
+    font-weight:600;
+    color: var(--text-dim);
+  }
+  .group-status.alert{ color: var(--green); }
+  .group-section{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .group-section h4{
+    font-size:13px;
+    color: var(--text-dim);
+    margin:0 0 8px;
+    font-weight:600;
+  }
+  .invite-card{
+    background: rgba(34,197,94,0.1);
+    border:1px solid var(--green);
+    border-radius:10px;
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .invite-card-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    font-size:14px;
+  }
+  .invite-actions{
+    display:flex;
+    gap:8px;
+  }
+  .invite-actions button{
+    padding:6px 14px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.06);
+    color: var(--text);
+    font-size:13px;
+    cursor:pointer;
+  }
+  .invite-actions .accept-btn{ background: rgba(34,197,94,0.22); border-color: var(--green); color: var(--green); }
+  .invite-actions .decline-btn{ background: rgba(239,68,68,0.18); border-color: var(--red); color: var(--red); }
+  .group-item{
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:12px;
+  }
+  .group-item-name{ font-weight:700; font-size:14px; margin-bottom:8px; }
+  .member-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 4px;
+    font-size:13px;
+    border-top:1px solid var(--border);
+    cursor:pointer;
+  }
+  .member-row:first-of-type{ border-top:none; }
+  .member-row.me{ cursor:default; color: var(--text-dim); }
+  .member-status{ font-size:11px; color: var(--text-dim); }
+  .invite-form{
+    display:flex;
+    gap:8px;
+    margin-top:8px;
+  }
+  .invite-form input{
+    flex:1;
+    background: rgba(255,255,255,0.06);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:8px 10px;
+    color: var(--text);
+    font-size:13px;
+  }
+  .invite-form button{
+    padding:8px 14px;
+    border-radius:8px;
+    border:none;
+    background: var(--accent);
+    color:#0a0f1a;
+    font-weight:600;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .create-group-form{
+    display:flex;
+    gap:8px;
+  }
+  .create-group-form input{
+    flex:1;
+    background: rgba(255,255,255,0.06);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:9px 12px;
+    color: var(--text);
+    font-size:14px;
+  }
+  .create-group-form button{
+    padding:9px 16px;
+    border-radius:8px;
+    border:none;
+    background: var(--accent);
+    color:#0a0f1a;
+    font-weight:600;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .group-error{
+    font-size:12px;
+    color: var(--red);
+  }
+
   /* ---------- Form ---------- */
   .form-title{
     font-size:15px;
@@ -938,11 +1071,13 @@
       grid-template-columns: 380px 1fr;
       grid-template-areas:
         "summary summary"
+        "group group"
         "form list";
       gap:20px;
       padding: 28px 32px 60px;
     }
     .summary-card{ grid-area: summary; }
+    .group-card{ grid-area: group; }
     .form-card{ grid-area: form; align-self:start; position:sticky; top:28px; }
     .list-card{ grid-area: list; align-self:start; }
     .summary{
@@ -1001,6 +1136,14 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Group -->
+    <div class="card group-card">
+      <button type="button" class="group-btn" id="groupBtn">
+        <span>הקבוצה שלי</span>
+        <span class="group-status" id="groupStatus">טוען…</span>
+      </button>
     </div>
 
     <!-- Add Trade Form -->
@@ -1678,6 +1821,7 @@
     const { data, error } = await sb
       .from('trades')
       .select('*')
+      .eq('user_id', currentUserId)
       .order('trade_date', { ascending:false })
       .order('id', { ascending:false });
 
@@ -1714,6 +1858,212 @@
     }
     await loadTrades();
   }
+
+  // ---- groups ----
+  let myGroups = [];
+  let pendingInvites = [];
+
+  async function loadGroups(){
+    const { data, error } = await sb.from('group_members').select('*').order('created_at');
+    if (error){ console.error(error); return; }
+    const rows = data || [];
+
+    pendingInvites = rows.filter(r => r.status === 'pending' && (r.email || '').toLowerCase() === (currentUserEmail || '').toLowerCase());
+
+    const myActiveGroupIds = [...new Set(rows.filter(r => r.status === 'active' && r.user_id === currentUserId).map(r => r.group_id))];
+    const relevantGroupIds = [...new Set([...myActiveGroupIds, ...pendingInvites.map(r => r.group_id)])];
+
+    const groupsMap = {};
+    myActiveGroupIds.forEach(gid => { groupsMap[gid] = { id: gid, name: '', members: [] }; });
+    rows.forEach(r => { if (groupsMap[r.group_id]) groupsMap[r.group_id].members.push(r); });
+
+    if (relevantGroupIds.length){
+      const { data: groupRows, error: gErr } = await sb.from('groups').select('id,name').in('id', relevantGroupIds);
+      if (gErr){ console.error(gErr); }
+      (groupRows || []).forEach(g => {
+        if (groupsMap[g.id]) groupsMap[g.id].name = g.name;
+        pendingInvites.forEach(inv => { if (inv.group_id === g.id) inv.groupName = g.name; });
+      });
+    }
+
+    myGroups = Object.values(groupsMap);
+    updateGroupButtonStatus();
+  }
+
+  function updateGroupButtonStatus(){
+    const el = $('#groupStatus');
+    if (!el) return;
+    if (pendingInvites.length){
+      el.textContent = `יש לך ${pendingInvites.length} הזמנה ${pendingInvites.length > 1 ? 'ות' : ''}!`;
+      el.classList.add('alert');
+    } else {
+      el.classList.remove('alert');
+      el.textContent = myGroups.length ? `${myGroups.length} קבוצות` : 'אין קבוצה';
+    }
+  }
+
+  async function createGroup(name){
+    const { error } = await sb.from('groups').insert({ name });
+    if (error) throw error;
+    await loadGroups();
+  }
+
+  async function inviteToGroup(groupId, email){
+    const { error } = await sb.from('group_members').insert({
+      group_id: groupId,
+      email: email.trim().toLowerCase(),
+      invited_by: currentUserId,
+      status: 'pending'
+    });
+    if (error) throw error;
+    await loadGroups();
+  }
+
+  async function respondToInvite(rowId, accept){
+    const { error } = await sb.from('group_members')
+      .update(accept
+        ? { status: 'active', user_id: currentUserId, responded_at: new Date().toISOString() }
+        : { status: 'declined', responded_at: new Date().toISOString() })
+      .eq('id', rowId);
+    if (error) throw error;
+    await loadGroups();
+  }
+
+  async function viewMemberTrades(memberUserId, memberEmail){
+    const { data, error } = await sb.from('trades')
+      .select('*')
+      .eq('user_id', memberUserId)
+      .order('trade_date', { ascending:false })
+      .order('id', { ascending:false });
+    if (error){
+      console.error(error);
+      return;
+    }
+    const memberTrades = (data || []).map(rowToTrade);
+    const wrap = document.createElement('div');
+    wrap.className = 'trades-list';
+    if (memberTrades.length === 0){
+      wrap.innerHTML = '<div class="empty">אין עדיין עסקאות</div>';
+    } else {
+      memberTrades.forEach(t => wrap.appendChild(buildTradeRow(t, true)));
+    }
+    openModal(`העסקאות של ${memberEmail}`, wrap);
+  }
+
+  function statusLabel(status){
+    if (status === 'active') return 'פעיל';
+    if (status === 'pending') return 'ממתין';
+    if (status === 'declined') return 'סורב';
+    return status;
+  }
+
+  function renderGroupModal(){
+    const wrap = document.createElement('div');
+    wrap.className = 'group-section';
+
+    if (pendingInvites.length){
+      const invitesBlock = document.createElement('div');
+      pendingInvites.forEach(inv => {
+        const card = document.createElement('div');
+        card.className = 'invite-card';
+        card.innerHTML = `
+          <div class="invite-card-row">
+            <span>הוזמנת לקבוצה "${escapeHtml(inv.groupName || '')}"</span>
+          </div>
+          <div class="invite-actions">
+            <button class="accept-btn">אשר</button>
+            <button class="decline-btn">דחה</button>
+          </div>
+        `;
+        card.querySelector('.accept-btn').addEventListener('click', async () => {
+          await respondToInvite(inv.id, true);
+          renderGroupModal();
+        });
+        card.querySelector('.decline-btn').addEventListener('click', async () => {
+          await respondToInvite(inv.id, false);
+          renderGroupModal();
+        });
+        invitesBlock.appendChild(card);
+      });
+      wrap.appendChild(invitesBlock);
+    }
+
+    if (myGroups.length === 0){
+      const empty = document.createElement('p');
+      empty.className = 'coach-space-empty';
+      empty.textContent = 'עדיין אין לך קבוצה.';
+      wrap.appendChild(empty);
+    }
+
+    myGroups.forEach(g => {
+      const item = document.createElement('div');
+      item.className = 'group-item';
+      const activeMembers = g.members.filter(m => m.status === 'active');
+      const otherStatusMembers = g.members.filter(m => m.status !== 'active');
+      item.innerHTML = `<div class="group-item-name">${escapeHtml(g.name || '')}</div>`;
+
+      activeMembers.forEach(m => {
+        const isMe = m.user_id === currentUserId;
+        const row = document.createElement('div');
+        row.className = 'member-row' + (isMe ? ' me' : '');
+        row.innerHTML = `<span>${escapeHtml(m.email)}${isMe ? ' (אתה)' : ''}</span><span class="member-status">${isMe ? '' : 'לצפייה ←'}</span>`;
+        if (!isMe){
+          row.addEventListener('click', () => viewMemberTrades(m.user_id, m.email));
+        }
+        item.appendChild(row);
+      });
+      otherStatusMembers.forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'member-row me';
+        row.innerHTML = `<span>${escapeHtml(m.email)}</span><span class="member-status">${statusLabel(m.status)}</span>`;
+        item.appendChild(row);
+      });
+
+      const inviteForm = document.createElement('div');
+      inviteForm.className = 'invite-form';
+      inviteForm.innerHTML = `<input type="email" placeholder="אימייל להזמנה" required><button type="button">הזמן</button>`;
+      const inviteInput = inviteForm.querySelector('input');
+      const inviteErr = document.createElement('div');
+      inviteErr.className = 'group-error';
+      inviteForm.querySelector('button').addEventListener('click', async () => {
+        if (!inviteInput.value.trim()) return;
+        try {
+          await inviteToGroup(g.id, inviteInput.value);
+          renderGroupModal();
+        } catch (e){
+          inviteErr.textContent = e.message && e.message.includes('duplicate') ? 'כבר הוזמן לקבוצה הזו' : (e.message || 'שגיאה בהזמנה');
+        }
+      });
+      item.appendChild(inviteForm);
+      item.appendChild(inviteErr);
+
+      wrap.appendChild(item);
+    });
+
+    const createForm = document.createElement('div');
+    createForm.className = 'create-group-form';
+    createForm.innerHTML = `<input type="text" placeholder="שם קבוצה חדשה" required><button type="button">צור קבוצה</button>`;
+    const createInput = createForm.querySelector('input');
+    const createErr = document.createElement('div');
+    createErr.className = 'group-error';
+    createForm.querySelector('button').addEventListener('click', async () => {
+      if (!createInput.value.trim()) return;
+      try {
+        await createGroup(createInput.value.trim());
+        renderGroupModal();
+      } catch (e){
+        createErr.textContent = e.message || 'שגיאה ביצירת קבוצה';
+      }
+    });
+    wrap.appendChild(createForm);
+    wrap.appendChild(createErr);
+
+    openModal('הקבוצה שלי', wrap);
+  }
+
+  $('#groupBtn').addEventListener('click', () => {
+    renderGroupModal();
+  });
 
   // ---- live sync across devices ----
   sb.channel('trades-sync')
@@ -1858,7 +2208,7 @@
     list.forEach(t => container.appendChild(buildTradeRow(t)));
   }
 
-  function buildTradeRow(t){
+  function buildTradeRow(t, readOnly){
     const row = document.createElement('div');
     row.className = 'trade-row' + (t.id === editingId ? ' editing' : '');
     row.innerHTML = `
@@ -1868,20 +2218,24 @@
         <span class="trade-prices">כניסה ${t.entry} · יציאה ${t.exit}</span>
       </div>
       <span class="trade-points ${pointsClass(t.points)}">${fmtPoints(t.points)}</span>
+      ${readOnly ? '' : `
       <div class="row-actions">
         <button class="edit-btn" title="ערוך">✎</button>
         <button class="del-btn" title="מחק">✕</button>
       </div>
+      `}
     `;
-    row.querySelector('.edit-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeModal();
-      startEdit(t);
-    });
-    row.querySelector('.del-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteTrade(t.id);
-    });
+    if (!readOnly){
+      row.querySelector('.edit-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeModal();
+        startEdit(t);
+      });
+      row.querySelector('.del-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteTrade(t.id);
+      });
+    }
     row.addEventListener('click', () => openTradeDetail(t));
     row.style.cursor = 'pointer';
     return row;
@@ -2203,20 +2557,26 @@
 
   let appInited = false;
   let currentUserId = null;
+  let currentUserEmail = null;
   sb.auth.onAuthStateChange((event, session) => {
     if (session && session.user){
       currentUserId = session.user.id;
+      currentUserEmail = session.user.email || '';
       authOverlay.classList.remove('show');
       $('#accountEmail').textContent = session.user.email || '';
       if (!appInited){
         appInited = true;
         loadTrades();
+        loadGroups();
       }
     } else {
       currentUserId = null;
+      currentUserEmail = null;
       authOverlay.classList.add('show');
       appInited = false;
       trades = [];
+      myGroups = [];
+      pendingInvites = [];
       render();
     }
   });
