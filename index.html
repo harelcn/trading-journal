@@ -51,6 +51,50 @@
     overflow-y:auto;
     -webkit-overflow-scrolling:touch;
   }
+  .page-nav{
+    position:sticky;
+    top:0;
+    z-index:30;
+    display:flex;
+    gap:4px;
+    background: var(--glass-bg-strong);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom:1px solid var(--border);
+    padding:8px 14px;
+    max-width:1180px;
+    margin:0 auto;
+  }
+  .page-nav button{
+    flex:1;
+    padding:10px 6px;
+    border-radius:10px;
+    border:none;
+    background:none;
+    color: var(--text-dim);
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .page-nav button.active{
+    background: rgba(110,168,255,0.16);
+    color: var(--accent);
+  }
+  .page-container{
+    max-width:1180px;
+    margin:0 auto;
+    padding:20px 14px 60px;
+  }
+  .page-placeholder{
+    text-align:center;
+    color: var(--text-dim);
+    font-size:14px;
+    padding:60px 20px;
+  }
+  @media (min-width:900px){
+    .page-container{ padding:28px 32px 60px; }
+  }
   .app{
     max-width: 720px;
     margin: 0 auto;
@@ -1071,13 +1115,11 @@
       grid-template-columns: 380px 1fr;
       grid-template-areas:
         "summary summary"
-        "group group"
         "form list";
       gap:20px;
       padding: 28px 32px 60px;
     }
     .summary-card{ grid-area: summary; }
-    .group-card{ grid-area: group; }
     .form-card{ grid-area: form; align-self:start; position:sticky; top:28px; }
     .list-card{ grid-area: list; align-self:start; }
     .summary{
@@ -1102,7 +1144,15 @@
 
   <div class="bg-layer"></div>
   <div class="scroll-layer">
-  <div class="app">
+
+  <div class="page-nav" id="pageNav">
+    <button type="button" class="active" data-page="journal">יומן</button>
+    <button type="button" data-page="group">קבוצה</button>
+    <button type="button" data-page="personal-coach">מאמן אישי</button>
+    <button type="button" data-page="group-coach">מאמן קבוצה</button>
+  </div>
+
+  <div class="app" id="page-journal">
     <!-- Summary Bar -->
     <div class="card summary-card">
       <div class="account-bar" id="accountBar">
@@ -1136,14 +1186,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Group -->
-    <div class="card group-card">
-      <button type="button" class="group-btn" id="groupBtn">
-        <span>הקבוצה שלי</span>
-        <span class="group-status" id="groupStatus">טוען…</span>
-      </button>
     </div>
 
     <!-- Add Trade Form -->
@@ -1230,6 +1272,20 @@
       <div class="cal-grid" id="calGrid"></div>
     </div>
   </div>
+
+  <div class="page-container" id="page-group" style="display:none">
+    <div class="card group-card">
+      <button type="button" class="group-btn" id="groupBtn">
+        <span>הקבוצה שלי</span>
+        <span class="group-status" id="groupStatus">טוען…</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="page-container" id="page-group-coach" style="display:none">
+    <p class="page-placeholder">מאמן הקבוצה בדרך — בקרוב.</p>
+  </div>
+
   </div>
 
   <div class="auth-overlay" id="authOverlay">
@@ -2078,6 +2134,26 @@
 
   $('#groupBtn').addEventListener('click', () => {
     renderGroupModal();
+  });
+
+  // ---- page navigation ----
+  let currentPage = 'journal';
+  function setPage(page){
+    currentPage = page;
+    document.querySelectorAll('.page-nav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+    $('#page-journal').style.display = page === 'journal' ? '' : 'none';
+    $('#page-group').style.display = page === 'group' ? 'block' : 'none';
+    $('#page-group-coach').style.display = page === 'group-coach' ? 'block' : 'none';
+  }
+  document.querySelectorAll('.page-nav button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.page === 'personal-coach'){
+        $('#chatOverlay').classList.add('show');
+        await loadChatHistory();
+        return;
+      }
+      setPage(btn.dataset.page);
+    });
   });
 
   // ---- live sync across devices ----
