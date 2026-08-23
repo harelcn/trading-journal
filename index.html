@@ -240,7 +240,106 @@
   .neg{ color: var(--red); }
   .zero{ color: var(--text); }
 
-  /* ---------- Group ---------- */
+  /* ---------- Group page ---------- */
+  .group-tabs{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+  .group-tab-btn{
+    padding:10px 16px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    font-size:14px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .group-tab-btn.active{
+    background: rgba(110,168,255,0.18);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .group-tab-btn.add-group{
+    border-style:dashed;
+    color: var(--text-dim);
+  }
+  .group-subnav{
+    display:flex;
+    gap:8px;
+    margin-bottom:16px;
+  }
+  .group-subnav button{
+    flex:1;
+    padding:10px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-dim);
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+  }
+  .group-subnav button.active{
+    background: rgba(110,168,255,0.18);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .member-cards{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px,1fr));
+    gap:14px;
+    margin-bottom:20px;
+  }
+  .member-card{
+    background: var(--glass-bg);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    padding:16px;
+    cursor:pointer;
+    transition: border-color .15s ease;
+  }
+  .member-card.selected{ border-color: var(--accent); }
+  .member-card.me{ border-color: var(--green); }
+  .member-card-name{ font-weight:700; font-size:15px; margin-bottom:10px; }
+  .member-card-stats{ display:flex; gap:14px; }
+  .member-card-stat{ flex:1; }
+  .member-card-stat .label{ font-size:11px; color:var(--text-dim); margin-bottom:2px; }
+  .member-card-stat .value{ font-size:16px; font-weight:700; }
+  .member-detail{
+    background: var(--glass-bg);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    padding:20px;
+  }
+  .member-detail-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  .member-detail-header h3{ margin:0; font-size:18px; }
+  .member-detail-summary{
+    display:flex;
+    gap:14px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+  .inline-chat-box{
+    background: var(--glass-bg);
+    border:1px solid var(--border);
+    border-radius: var(--radius);
+    height:60vh;
+    min-height:420px;
+    max-height:640px;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
   .group-btn{
     width:100%;
     display:flex;
@@ -1148,8 +1247,6 @@
   <div class="page-nav" id="pageNav">
     <button type="button" class="active" data-page="journal">יומן</button>
     <button type="button" data-page="group">קבוצה</button>
-    <button type="button" data-page="personal-coach">מאמן אישי</button>
-    <button type="button" data-page="group-coach">מאמן קבוצה</button>
   </div>
 
   <div class="app" id="page-journal">
@@ -1274,16 +1371,9 @@
   </div>
 
   <div class="page-container" id="page-group" style="display:none">
-    <div class="card group-card">
-      <button type="button" class="group-btn" id="groupBtn">
-        <span>הקבוצה שלי</span>
-        <span class="group-status" id="groupStatus">טוען…</span>
-      </button>
-    </div>
-  </div>
-
-  <div class="page-container" id="page-group-coach" style="display:none">
-    <p class="page-placeholder">מאמן הקבוצה בדרך — בקרוב.</p>
+    <div id="groupPendingInvites"></div>
+    <div class="group-tabs" id="groupTabs"></div>
+    <div id="groupWorkspace"></div>
   </div>
 
   </div>
@@ -1933,6 +2023,14 @@
   // ---- groups ----
   let myGroups = [];
   let pendingInvites = [];
+  let profilesCache = {};
+  let memberStatsCache = {};
+  let selectedGroupId = null;
+  let selectedMemberId = null;
+  let selectedMemberTrades = null;
+  let groupSubTab = 'members';
+  let groupChatHistory = [];
+  let privateChatHistory = [];
 
   async function loadGroups(){
     const { data, error } = await sb.from('group_members').select('*').order('created_at');
@@ -1958,19 +2056,33 @@
     }
 
     myGroups = Object.values(groupsMap);
-    updateGroupButtonStatus();
+
+    const memberUserIds = [...new Set(myGroups.flatMap(g => g.members.filter(m => m.user_id).map(m => m.user_id)))];
+    if (memberUserIds.length){
+      const { data: profRows } = await sb.from('profiles').select('user_id,display_name').in('user_id', memberUserIds);
+      (profRows || []).forEach(p => { profilesCache[p.user_id] = p.display_name; });
+    }
+
+    if (!selectedGroupId || !myGroups.find(g => g.id === selectedGroupId)){
+      selectedGroupId = myGroups.length ? myGroups[0].id : null;
+      selectedMemberId = null;
+      selectedMemberTrades = null;
+    }
+
+    renderGroupPage();
+    const activeGroup = myGroups.find(g => g.id === selectedGroupId);
+    if (activeGroup) loadMemberStatsForGroup(activeGroup);
   }
 
-  function updateGroupButtonStatus(){
-    const el = $('#groupStatus');
-    if (!el) return;
-    if (pendingInvites.length){
-      el.textContent = `יש לך ${pendingInvites.length} הזמנה ${pendingInvites.length > 1 ? 'ות' : ''}!`;
-      el.classList.add('alert');
-    } else {
-      el.classList.remove('alert');
-      el.textContent = myGroups.length ? `${myGroups.length} קבוצות` : 'אין קבוצה';
-    }
+  function memberDisplayName(m){
+    return (m.user_id && profilesCache[m.user_id]) || m.email;
+  }
+
+  function statusLabel(status){
+    if (status === 'active') return 'פעיל';
+    if (status === 'pending') return 'ממתין';
+    if (status === 'declined') return 'סורב';
+    return status;
   }
 
   async function createGroup(name){
@@ -2000,141 +2112,357 @@
     await loadGroups();
   }
 
-  async function viewMemberTrades(memberUserId, memberEmail){
-    const { data, error } = await sb.from('trades')
-      .select('*')
-      .eq('user_id', memberUserId)
-      .order('trade_date', { ascending:false })
-      .order('id', { ascending:false });
-    if (error){
-      console.error(error);
-      return;
-    }
-    const memberTrades = (data || []).map(rowToTrade);
-    const wrap = document.createElement('div');
-    wrap.className = 'trades-list';
-    if (memberTrades.length === 0){
-      wrap.innerHTML = '<div class="empty">אין עדיין עסקאות</div>';
-    } else {
-      memberTrades.forEach(t => wrap.appendChild(buildTradeRow(t, true)));
-    }
-    openModal(`העסקאות של ${memberEmail}`, wrap);
+  async function loadMemberStatsForGroup(group){
+    const activeIds = group.members.filter(m => m.status === 'active' && m.user_id).map(m => m.user_id);
+    if (!activeIds.length) return;
+    const { data, error } = await sb.from('trades').select('user_id, points').in('user_id', activeIds);
+    if (error){ console.error(error); return; }
+    const byUser = {};
+    activeIds.forEach(id => { byUser[id] = []; });
+    (data || []).forEach(r => { if (byUser[r.user_id]) byUser[r.user_id].push(Number(r.points)); });
+    Object.keys(byUser).forEach(id => {
+      const pts = byUser[id];
+      const wins = pts.filter(p => p > 0).length;
+      memberStatsCache[id] = {
+        total: pts.length,
+        winRate: pts.length ? Math.round((wins/pts.length)*1000)/10 : 0,
+        totalPoints: pts.reduce((s,p)=>s+p,0)
+      };
+    });
+    renderGroupPage();
   }
 
-  function statusLabel(status){
-    if (status === 'active') return 'פעיל';
-    if (status === 'pending') return 'ממתין';
-    if (status === 'declined') return 'סורב';
-    return status;
+  function computeSummary(tradesArr){
+    const total = tradesArr.length;
+    const wins = tradesArr.filter(t => t.points > 0).length;
+    const winRate = total ? Math.round((wins/total)*1000)/10 : 0;
+    const totalPoints = tradesArr.reduce((s,t) => s+t.points, 0);
+    return { total, wins, winRate, totalPoints };
   }
 
-  function renderGroupModal(){
-    const wrap = document.createElement('div');
-    wrap.className = 'group-section';
+  async function selectMember(userId){
+    selectedMemberId = userId;
+    selectedMemberTrades = null;
+    renderGroupPage();
+    const { data, error } = await sb.from('trades').select('*').eq('user_id', userId)
+      .order('trade_date', { ascending:false }).order('id', { ascending:false });
+    if (error){ console.error(error); return; }
+    if (selectedMemberId !== userId) return;
+    selectedMemberTrades = (data || []).map(rowToTrade);
+    renderGroupPage();
+  }
 
-    if (pendingInvites.length){
-      const invitesBlock = document.createElement('div');
-      pendingInvites.forEach(inv => {
-        const card = document.createElement('div');
-        card.className = 'invite-card';
-        card.innerHTML = `
-          <div class="invite-card-row">
-            <span>הוזמנת לקבוצה "${escapeHtml(inv.groupName || '')}"</span>
-          </div>
-          <div class="invite-actions">
-            <button class="accept-btn">אשר</button>
-            <button class="decline-btn">דחה</button>
-          </div>
-        `;
-        card.querySelector('.accept-btn').addEventListener('click', async () => {
-          await respondToInvite(inv.id, true);
-          renderGroupModal();
-        });
-        card.querySelector('.decline-btn').addEventListener('click', async () => {
-          await respondToInvite(inv.id, false);
-          renderGroupModal();
-        });
-        invitesBlock.appendChild(card);
+  async function buildGroupContext(groupId){
+    const group = myGroups.find(g => g.id === groupId);
+    if (!group) return '';
+    const activeMembers = group.members.filter(m => m.status === 'active' && m.user_id);
+    const ids = activeMembers.map(m => m.user_id);
+    if (!ids.length) return 'אין עדיין חברים פעילים בקבוצה.';
+    const { data, error } = await sb.from('trades').select('user_id, points, tools_used').in('user_id', ids);
+    if (error){ console.error(error); return ''; }
+    const rows = data || [];
+    let out = `קבוצה: ${group.name}\n\n`;
+    activeMembers.forEach(m => {
+      const name = memberDisplayName(m);
+      const myRows = rows.filter(r => r.user_id === m.user_id);
+      const total = myRows.length;
+      const wins = myRows.filter(r => Number(r.points) > 0).length;
+      const winRate = total ? (wins/total*100).toFixed(1) : '0';
+      const totalPoints = myRows.reduce((s,r) => s+Number(r.points), 0);
+      const toolCounts = {};
+      myRows.forEach(r => (r.tools_used || []).forEach(t => { toolCounts[t] = (toolCounts[t]||0) + 1; }));
+      const toolsStr = Object.entries(toolCounts)
+        .map(([k,v]) => `${(TOOL_DEFS.find(d=>d.key===k)||{}).label || k}:${v}`).join(', ') || 'אין נתוני כלים';
+      out += `--- ${name} ---\nעסקאות: ${total} | win rate: ${winRate}% | סה"כ נקודות: ${fmtPoints(totalPoints)}\nשימוש בכלים: ${toolsStr}\n\n`;
+    });
+    return out;
+  }
+
+  async function fetchSharedChatText(groupId){
+    const { data, error } = await sb.from('group_chat_messages').select('*').eq('group_id', groupId)
+      .order('created_at', { ascending:false }).limit(30);
+    if (error){ console.error(error); return ''; }
+    const rows = (data || []).reverse();
+    return rows.map(r => `${r.role === 'user' ? (profilesCache[r.user_id] || 'משתמש') : 'המאמן'}: ${r.content}`).join('\n');
+  }
+
+  async function loadGroupChat(groupId){
+    const { data, error } = await sb.from('group_chat_messages').select('*').eq('group_id', groupId).order('created_at');
+    if (error){ console.error(error); return; }
+    groupChatHistory = (data || []).map(r => ({ role: r.role, content: r.content, user_id: r.user_id }));
+    renderGroupChatMessages('shared', groupChatHistory);
+  }
+
+  async function loadPrivateChat(groupId){
+    const { data, error } = await sb.from('group_coach_private_messages').select('*')
+      .eq('group_id', groupId).eq('user_id', currentUserId).order('created_at');
+    if (error){ console.error(error); return; }
+    privateChatHistory = (data || []).map(r => ({ role: r.role, content: r.content, user_id: r.user_id }));
+    renderGroupChatMessages('private', privateChatHistory);
+  }
+
+  function renderGroupChatMessages(channel, historyArr){
+    const container = document.querySelector(`#groupChatMessages-${channel}`);
+    if (!container) return;
+    container.innerHTML = '';
+    historyArr.forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + (m.role === 'user' ? 'user' : 'assistant') + (m.loading ? ' loading' : '');
+      let prefix = '';
+      if (channel === 'shared' && m.role === 'user'){
+        prefix = (m.user_id === currentUserId ? 'אתה' : (profilesCache[m.user_id] || 'חבר קבוצה')) + ': ';
+      }
+      div.textContent = prefix + (m.content || '');
+      container.appendChild(div);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function sendGroupChatMessage(groupId, channel){
+    const inputEl = $(`#groupChatInput-${channel}`);
+    const text = inputEl.value.trim();
+    if (!text) return;
+    const sendBtn = $(`#groupChatSend-${channel}`);
+    inputEl.value = '';
+    sendBtn.disabled = true;
+
+    const table = channel === 'shared' ? 'group_chat_messages' : 'group_coach_private_messages';
+    const historyArr = channel === 'shared' ? groupChatHistory : privateChatHistory;
+
+    historyArr.push({ role: 'user', content: text, user_id: currentUserId });
+    renderGroupChatMessages(channel, historyArr);
+
+    const insertPayload = { group_id: groupId, role: 'user', content: text };
+    if (channel === 'private') insertPayload.user_id = currentUserId;
+    const { error: insertErr } = await sb.from(table).insert(insertPayload);
+    if (insertErr) console.error(insertErr);
+
+    historyArr.push({ role: 'assistant', content: 'המאמן מקליד…', loading: true });
+    renderGroupChatMessages(channel, historyArr);
+
+    try {
+      const [groupContext, sharedChatContext] = await Promise.all([
+        buildGroupContext(groupId),
+        fetchSharedChatText(groupId)
+      ]);
+      const res = await fetch('/api/group-coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          groupContext,
+          sharedChatContext,
+          channel,
+          history: historyArr.filter(m => !m.loading).map(m => ({ role: m.role, content: m.content }))
+        })
       });
-      wrap.appendChild(invitesBlock);
+      const data = await res.json();
+      historyArr.pop();
+      if (!res.ok){
+        historyArr.push({ role: 'assistant', content: data.error || 'שגיאה בשרת' });
+      } else {
+        historyArr.push({ role: 'assistant', content: data.reply });
+        const assistantPayload = { group_id: groupId, role: 'assistant', content: data.reply };
+        if (channel === 'private') assistantPayload.user_id = currentUserId;
+        await sb.from(table).insert(assistantPayload);
+      }
+    } catch (e){
+      console.error(e);
+      historyArr.pop();
+      historyArr.push({ role: 'assistant', content: 'שגיאת חיבור — נסה שוב' });
+    } finally {
+      sendBtn.disabled = false;
+      renderGroupChatMessages(channel, historyArr);
     }
+  }
 
-    if (myGroups.length === 0){
-      const empty = document.createElement('p');
-      empty.className = 'coach-space-empty';
-      empty.textContent = 'עדיין אין לך קבוצה.';
-      wrap.appendChild(empty);
-    }
+  function renderGroupChatSection(container, group, channel){
+    const box = document.createElement('div');
+    box.className = 'inline-chat-box';
+    box.innerHTML = `
+      <div class="chat-messages" id="groupChatMessages-${channel}"></div>
+      <div class="chat-input-row">
+        <textarea id="groupChatInput-${channel}" rows="1" placeholder="${channel === 'shared' ? 'כתוב לקבוצה...' : 'שאל את המאמן בפרטי...'}"></textarea>
+        <button class="chat-send-btn" id="groupChatSend-${channel}" type="button">שלח</button>
+      </div>
+    `;
+    container.appendChild(box);
 
-    myGroups.forEach(g => {
-      const item = document.createElement('div');
-      item.className = 'group-item';
-      const activeMembers = g.members.filter(m => m.status === 'active');
-      const otherStatusMembers = g.members.filter(m => m.status !== 'active');
-      item.innerHTML = `<div class="group-item-name">${escapeHtml(g.name || '')}</div>`;
+    box.querySelector(`#groupChatSend-${channel}`).addEventListener('click', () => sendGroupChatMessage(group.id, channel));
+    box.querySelector(`#groupChatInput-${channel}`).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); sendGroupChatMessage(group.id, channel); }
+    });
 
-      activeMembers.forEach(m => {
-        const isMe = m.user_id === currentUserId;
-        const row = document.createElement('div');
-        row.className = 'member-row' + (isMe ? ' me' : '');
-        row.innerHTML = `<span>${escapeHtml(m.email)}${isMe ? ' (אתה)' : ''}</span><span class="member-status">${isMe ? '' : 'לצפייה ←'}</span>`;
-        if (!isMe){
-          row.addEventListener('click', () => viewMemberTrades(m.user_id, m.email));
-        }
-        item.appendChild(row);
-      });
-      otherStatusMembers.forEach(m => {
+    if (channel === 'shared') loadGroupChat(group.id);
+    else loadPrivateChat(group.id);
+  }
+
+  function renderMembersSection(container, group){
+    const activeMembers = group.members.filter(m => m.status === 'active');
+    const otherMembers = group.members.filter(m => m.status !== 'active');
+
+    const cardsWrap = document.createElement('div');
+    cardsWrap.className = 'member-cards';
+    activeMembers.forEach(m => {
+      const isMe = m.user_id === currentUserId;
+      const stats = memberStatsCache[m.user_id];
+      const card = document.createElement('div');
+      card.className = 'member-card' + (m.user_id === selectedMemberId ? ' selected' : '') + (isMe ? ' me' : '');
+      card.innerHTML = `
+        <div class="member-card-name">${escapeHtml(memberDisplayName(m))}${isMe ? ' (אתה)' : ''}</div>
+        <div class="member-card-stats">
+          ${stats ? `
+            <div class="member-card-stat"><div class="label">נק'</div><div class="value ${pointsClass(stats.totalPoints)}">${fmtPoints(stats.totalPoints)}</div></div>
+            <div class="member-card-stat"><div class="label">Win Rate</div><div class="value">${stats.winRate}%</div></div>
+            <div class="member-card-stat"><div class="label">עסקאות</div><div class="value">${stats.total}</div></div>
+          ` : `<div class="member-card-stat"><div class="label">טוען…</div></div>`}
+        </div>
+      `;
+      card.addEventListener('click', () => selectMember(m.user_id));
+      cardsWrap.appendChild(card);
+    });
+    container.appendChild(cardsWrap);
+
+    if (otherMembers.length){
+      const pendingList = document.createElement('div');
+      pendingList.style.marginBottom = '20px';
+      otherMembers.forEach(m => {
         const row = document.createElement('div');
         row.className = 'member-row me';
         row.innerHTML = `<span>${escapeHtml(m.email)}</span><span class="member-status">${statusLabel(m.status)}</span>`;
-        item.appendChild(row);
+        pendingList.appendChild(row);
       });
+      container.appendChild(pendingList);
+    }
 
-      const inviteForm = document.createElement('div');
-      inviteForm.className = 'invite-form';
-      inviteForm.innerHTML = `<input type="email" placeholder="אימייל להזמנה" required><button type="button">הזמן</button>`;
-      const inviteInput = inviteForm.querySelector('input');
-      const inviteErr = document.createElement('div');
-      inviteErr.className = 'group-error';
-      inviteForm.querySelector('button').addEventListener('click', async () => {
-        if (!inviteInput.value.trim()) return;
-        try {
-          await inviteToGroup(g.id, inviteInput.value);
-          renderGroupModal();
-        } catch (e){
-          inviteErr.textContent = e.message && e.message.includes('duplicate') ? 'כבר הוזמן לקבוצה הזו' : (e.message || 'שגיאה בהזמנה');
-        }
-      });
-      item.appendChild(inviteForm);
-      item.appendChild(inviteErr);
-
-      wrap.appendChild(item);
+    const inviteForm = document.createElement('div');
+    inviteForm.className = 'invite-form';
+    inviteForm.style.marginBottom = '20px';
+    inviteForm.innerHTML = `<input type="email" placeholder="אימייל להזמנה" required><button type="button">הזמן לקבוצה</button>`;
+    const inviteInput = inviteForm.querySelector('input');
+    const inviteErr = document.createElement('div');
+    inviteErr.className = 'group-error';
+    inviteForm.querySelector('button').addEventListener('click', async () => {
+      if (!inviteInput.value.trim()) return;
+      try { await inviteToGroup(group.id, inviteInput.value); }
+      catch (e){ inviteErr.textContent = (e.message && e.message.includes('duplicate')) ? 'כבר הוזמן לקבוצה הזו' : (e.message || 'שגיאה בהזמנה'); }
     });
+    container.appendChild(inviteForm);
+    container.appendChild(inviteErr);
 
-    const createForm = document.createElement('div');
-    createForm.className = 'create-group-form';
-    createForm.innerHTML = `<input type="text" placeholder="שם קבוצה חדשה" required><button type="button">צור קבוצה</button>`;
-    const createInput = createForm.querySelector('input');
-    const createErr = document.createElement('div');
-    createErr.className = 'group-error';
-    createForm.querySelector('button').addEventListener('click', async () => {
-      if (!createInput.value.trim()) return;
-      try {
-        await createGroup(createInput.value.trim());
-        renderGroupModal();
-      } catch (e){
-        createErr.textContent = e.message || 'שגיאה ביצירת קבוצה';
+    if (selectedMemberId){
+      const m = group.members.find(x => x.user_id === selectedMemberId);
+      const detail = document.createElement('div');
+      detail.className = 'member-detail';
+      if (selectedMemberTrades === null){
+        detail.innerHTML = `<h3>${escapeHtml(m ? memberDisplayName(m) : '')}</h3><p class="page-placeholder">טוען…</p>`;
+      } else {
+        const s = computeSummary(selectedMemberTrades);
+        detail.innerHTML = `
+          <div class="member-detail-header"><h3>${escapeHtml(m ? memberDisplayName(m) : '')}</h3></div>
+          <div class="member-detail-summary">
+            <div class="member-card-stat"><div class="label">סה"כ נקודות</div><div class="value ${pointsClass(s.totalPoints)}">${fmtPoints(s.totalPoints)}</div></div>
+            <div class="member-card-stat"><div class="label">Win Rate</div><div class="value">${s.winRate}%</div></div>
+            <div class="member-card-stat"><div class="label">עסקאות</div><div class="value">${s.total}</div></div>
+          </div>
+          <div class="trades-list" id="memberDetailTradesList"></div>
+        `;
       }
-    });
-    wrap.appendChild(createForm);
-    wrap.appendChild(createErr);
-
-    openModal('הקבוצה שלי', wrap);
+      container.appendChild(detail);
+      if (selectedMemberTrades !== null){
+        const listEl = detail.querySelector('#memberDetailTradesList');
+        if (selectedMemberTrades.length === 0) listEl.innerHTML = '<div class="empty">אין עדיין עסקאות</div>';
+        else selectedMemberTrades.forEach(t => listEl.appendChild(buildTradeRow(t, true)));
+      }
+    }
   }
 
-  $('#groupBtn').addEventListener('click', () => {
-    renderGroupModal();
-  });
+  function renderCreateGroupWorkspace(){
+    const workspace = $('#groupWorkspace');
+    workspace.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'create-group-form';
+    wrap.innerHTML = `<input type="text" placeholder="שם קבוצה חדשה" required><button type="button">צור קבוצה</button>`;
+    const input = wrap.querySelector('input');
+    const err = document.createElement('div');
+    err.className = 'group-error';
+    wrap.querySelector('button').addEventListener('click', async () => {
+      if (!input.value.trim()) return;
+      try { await createGroup(input.value.trim()); }
+      catch (e){ err.textContent = e.message || 'שגיאה ביצירת קבוצה'; }
+    });
+    workspace.appendChild(wrap);
+    workspace.appendChild(err);
+  }
+
+  function renderGroupPage(){
+    const invitesEl = $('#groupPendingInvites');
+    invitesEl.innerHTML = '';
+    pendingInvites.forEach(inv => {
+      const card = document.createElement('div');
+      card.className = 'invite-card';
+      card.style.marginBottom = '14px';
+      card.innerHTML = `
+        <div class="invite-card-row"><span>הוזמנת לקבוצה "${escapeHtml(inv.groupName || '')}"</span></div>
+        <div class="invite-actions">
+          <button class="accept-btn">אשר</button>
+          <button class="decline-btn">דחה</button>
+        </div>
+      `;
+      card.querySelector('.accept-btn').addEventListener('click', () => respondToInvite(inv.id, true));
+      card.querySelector('.decline-btn').addEventListener('click', () => respondToInvite(inv.id, false));
+      invitesEl.appendChild(card);
+    });
+
+    const tabsEl = $('#groupTabs');
+    tabsEl.innerHTML = '';
+    myGroups.forEach(g => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'group-tab-btn' + (g.id === selectedGroupId ? ' active' : '');
+      btn.textContent = g.name || '(ללא שם)';
+      btn.addEventListener('click', () => {
+        selectedGroupId = g.id;
+        selectedMemberId = null;
+        selectedMemberTrades = null;
+        groupSubTab = 'members';
+        groupChatHistory = [];
+        privateChatHistory = [];
+        renderGroupPage();
+        loadMemberStatsForGroup(g);
+      });
+      tabsEl.appendChild(btn);
+    });
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'group-tab-btn add-group';
+    addBtn.textContent = '+ קבוצה חדשה';
+    addBtn.addEventListener('click', renderCreateGroupWorkspace);
+    tabsEl.appendChild(addBtn);
+
+    const workspace = $('#groupWorkspace');
+    workspace.innerHTML = '';
+
+    const group = myGroups.find(g => g.id === selectedGroupId);
+    if (!group){
+      renderCreateGroupWorkspace();
+      return;
+    }
+
+    const subnav = document.createElement('div');
+    subnav.className = 'group-subnav';
+    [['members','חברים ועסקאות'], ['shared','צ׳אט קבוצתי'], ['private','צ׳אט אישי עם המאמן']].forEach(([key,label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.className = groupSubTab === key ? 'active' : '';
+      b.addEventListener('click', () => { groupSubTab = key; renderGroupPage(); });
+      subnav.appendChild(b);
+    });
+    workspace.appendChild(subnav);
+
+    if (groupSubTab === 'members') renderMembersSection(workspace, group);
+    else renderGroupChatSection(workspace, group, groupSubTab === 'shared' ? 'shared' : 'private');
+  }
 
   // ---- page navigation ----
   let currentPage = 'journal';
@@ -2143,17 +2471,9 @@
     document.querySelectorAll('.page-nav button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
     $('#page-journal').style.display = page === 'journal' ? '' : 'none';
     $('#page-group').style.display = page === 'group' ? 'block' : 'none';
-    $('#page-group-coach').style.display = page === 'group-coach' ? 'block' : 'none';
   }
   document.querySelectorAll('.page-nav button').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (btn.dataset.page === 'personal-coach'){
-        $('#chatOverlay').classList.add('show');
-        await loadChatHistory();
-        return;
-      }
-      setPage(btn.dataset.page);
-    });
+    btn.addEventListener('click', () => setPage(btn.dataset.page));
   });
 
   // ---- live sync across devices ----
