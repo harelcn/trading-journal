@@ -2416,7 +2416,12 @@
     let needsScan = false;
     if (activeIds.length){
       const { data, error } = await sb.from('trades').select('id').in('user_id', activeIds).gt('id', sinceId).limit(1);
-      if (!error && data && data.length) needsScan = true;
+      if (error){
+        console.error(error);
+        container.innerHTML = `<p class="page-placeholder">שגיאה בבדיקת עסקאות חדשות: ${escapeHtml(error.message || JSON.stringify(error))}</p>`;
+        return;
+      }
+      if (data && data.length) needsScan = true;
     }
 
     if (needsScan){
@@ -2429,22 +2434,42 @@
           body: JSON.stringify({ groupContext: context })
         });
         const data = await res.json();
-        if (res.ok && Array.isArray(data.cards) && data.cards.length){
+        if (!res.ok){
+          container.innerHTML = `<p class="page-placeholder">שגיאה מהמאמן: ${escapeHtml(data.error || 'שגיאה בשרת')}</p>`;
+          return;
+        }
+        if (Array.isArray(data.cards) && data.cards.length){
           const rows = data.cards.map(c => ({
             group_id: group.id, member_name: c.memberName, category: c.category, title: c.title, body: c.body
           }));
-          await sb.from('group_insights').insert(rows);
+          const { error: insertErr } = await sb.from('group_insights').insert(rows);
+          if (insertErr){
+            console.error(insertErr);
+            container.innerHTML = `<p class="page-placeholder">שגיאה בשמירת התובנות: ${escapeHtml(insertErr.message || JSON.stringify(insertErr))}</p>`;
+            return;
+          }
         }
-        await sb.from('groups').update({ last_scanned_max_trade_id: maxId }).eq('id', group.id);
+        const { error: updateErr } = await sb.from('groups').update({ last_scanned_max_trade_id: maxId }).eq('id', group.id);
+        if (updateErr){
+          console.error(updateErr);
+          container.innerHTML = `<p class="page-placeholder">שגיאה בעדכון נקודת הסריקה: ${escapeHtml(updateErr.message || JSON.stringify(updateErr))}</p>`;
+          return;
+        }
         group.lastScannedMaxTradeId = maxId;
       } catch (e){
         console.error(e);
+        container.innerHTML = `<p class="page-placeholder">שגיאת חיבור: ${escapeHtml(e.message || String(e))}</p>`;
+        return;
       }
     }
 
     const { data: cardsData, error: cardsErr } = await sb.from('group_insights').select('*')
       .eq('group_id', group.id).order('created_at', { ascending:false }).limit(20);
-    if (cardsErr){ console.error(cardsErr); container.innerHTML = '<p class="page-placeholder">שגיאה בטעינה</p>'; return; }
+    if (cardsErr){
+      console.error(cardsErr);
+      container.innerHTML = `<p class="page-placeholder">שגיאה בטעינה: ${escapeHtml(cardsErr.message || JSON.stringify(cardsErr))}</p>`;
+      return;
+    }
     renderInsightCards(container, cardsData || []);
   }
 
