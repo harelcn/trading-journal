@@ -241,6 +241,59 @@
   .zero{ color: var(--text); }
 
   /* ---------- Group page ---------- */
+  .members-layout{
+    display:flex;
+    flex-direction:column-reverse;
+    gap:20px;
+  }
+  .insights-col{ min-width:0; }
+  .members-col{ min-width:0; }
+  @media (min-width:900px){
+    .members-layout{
+      flex-direction:row;
+      align-items:flex-start;
+    }
+    .insights-col{ flex:0 0 320px; position:sticky; top:70px; }
+    .members-col{ flex:1; }
+  }
+  .insights-col h4{
+    font-size:14px;
+    color: var(--text-dim);
+    margin:0 0 10px;
+  }
+  .insight-card{
+    background: var(--glass-bg);
+    border:1px solid var(--border);
+    border-right:4px solid var(--accent);
+    border-radius:10px;
+    padding:12px 14px;
+    margin-bottom:10px;
+  }
+  .insight-card.insight-tip{ border-right-color: var(--accent); }
+  .insight-card.insight-pattern{ border-right-color:#a78bfa; }
+  .insight-card.insight-strength{ border-right-color: var(--green); }
+  .insight-card.insight-weakness{ border-right-color: var(--red); }
+  .insight-card.insight-general{ border-right-color: var(--text-dim); }
+  .insight-card-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:6px;
+  }
+  .insight-tag{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    color: var(--text-dim);
+    font-weight:700;
+  }
+  .insight-member{
+    font-size:11px;
+    color: var(--accent);
+    font-weight:600;
+  }
+  .insight-title{ font-weight:700; font-size:14px; margin-bottom:4px; }
+  .insight-body{ font-size:13px; color: var(--text-dim); line-height:1.5; }
   .group-tabs{
     display:flex;
     gap:8px;
@@ -2043,14 +2096,17 @@
     const relevantGroupIds = [...new Set([...myActiveGroupIds, ...pendingInvites.map(r => r.group_id)])];
 
     const groupsMap = {};
-    myActiveGroupIds.forEach(gid => { groupsMap[gid] = { id: gid, name: '', members: [] }; });
+    myActiveGroupIds.forEach(gid => { groupsMap[gid] = { id: gid, name: '', members: [], lastScannedMaxTradeId: 0 }; });
     rows.forEach(r => { if (groupsMap[r.group_id]) groupsMap[r.group_id].members.push(r); });
 
     if (relevantGroupIds.length){
-      const { data: groupRows, error: gErr } = await sb.from('groups').select('id,name').in('id', relevantGroupIds);
+      const { data: groupRows, error: gErr } = await sb.from('groups').select('id,name,last_scanned_max_trade_id').in('id', relevantGroupIds);
       if (gErr){ console.error(gErr); }
       (groupRows || []).forEach(g => {
-        if (groupsMap[g.id]) groupsMap[g.id].name = g.name;
+        if (groupsMap[g.id]){
+          groupsMap[g.id].name = g.name;
+          groupsMap[g.id].lastScannedMaxTradeId = g.last_scanned_max_trade_id || 0;
+        }
         pendingInvites.forEach(inv => { if (inv.group_id === g.id) inv.groupName = g.name; });
       });
     }
@@ -2296,7 +2352,117 @@
     else loadPrivateChat(group.id);
   }
 
-  function renderMembersSection(container, group){
+  async function buildInsightScanContext(group, sinceTradeId){
+    const activeMembers = group.members.filter(m => m.status === 'active' && m.user_id);
+    const ids = activeMembers.map(m => m.user_id);
+    if (!ids.length) return { context: '', maxId: sinceTradeId };
+    const { data, error } = await sb.from('trades')
+      .select('id, user_id, dir, trade_date, points, tools_used, confidence, notes').in('user_id', ids).order('id');
+    if (error){ console.error(error); return { context: '', maxId: sinceTradeId }; }
+    const rows = data || [];
+    const maxId = rows.reduce((m,r) => Math.max(m, r.id), sinceTradeId);
+    let out = `קבוצה: ${group.name}\n\n`;
+    activeMembers.forEach(m => {
+      const name = memberDisplayName(m);
+      const myRows = rows.filter(r => r.user_id === m.user_id);
+      const total = myRows.length;
+      const wins = myRows.filter(r => Number(r.points) > 0).length;
+      const winRate = total ? (wins/total*100).toFixed(1) : '0';
+      const totalPoints = myRows.reduce((s,r) => s+Number(r.points), 0);
+      out += `--- ${name} ---\nסה"כ עסקאות עד כה: ${total} | win rate: ${winRate}% | סה"כ נקודות: ${fmtPoints(totalPoints)}\n`;
+      const newRows = myRows.filter(r => r.id > sinceTradeId);
+      if (newRows.length){
+        out += `עסקאות חדשות שטרם נותחו (${newRows.length}):\n`;
+        newRows.forEach(r => {
+          const toolsStr = (r.tools_used || []).map(k => (TOOL_DEFS.find(d=>d.key===k)||{}).label || k).join(', ') || 'ללא';
+          out += `  - ${r.trade_date} | ${r.dir==='long'?'לונג':'שורט'} | ${fmtPoints(Number(r.points))} נק' | ביטחון: ${r.confidence || 'לא צוין'} | כלים: ${toolsStr}${r.notes ? ' | הערות: ' + r.notes.slice(0,150) : ''}\n`;
+        });
+      } else {
+        out += `אין עסקאות חדשות מאז הסריקה האחרונה.\n`;
+      }
+      out += '\n';
+    });
+    return { context: out, maxId };
+  }
+
+  function renderInsightCards(container, cards){
+    if (!cards.length){
+      container.innerHTML = '<p class="page-placeholder">אין עדיין תובנות — יופיעו כאן אחרי שיהיו עסקאות חדשות לנתח.</p>';
+      return;
+    }
+    const labels = { tip:'טיפ', pattern:'דפוס משותף', strength:'חוזקה', weakness:'חולשה', general:'כללי' };
+    container.innerHTML = '';
+    cards.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'insight-card insight-' + c.category;
+      card.innerHTML = `
+        <div class="insight-card-head">
+          <span class="insight-tag">${labels[c.category] || c.category}</span>
+          ${c.member_name ? `<span class="insight-member">${escapeHtml(c.member_name)}</span>` : ''}
+        </div>
+        <div class="insight-title">${escapeHtml(c.title)}</div>
+        <div class="insight-body">${escapeHtml(c.body)}</div>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  async function loadGroupInsights(group){
+    const container = $('#groupInsightsFeed');
+    if (!container) return;
+    const activeIds = group.members.filter(m => m.status === 'active' && m.user_id).map(m => m.user_id);
+    const sinceId = group.lastScannedMaxTradeId || 0;
+
+    let needsScan = false;
+    if (activeIds.length){
+      const { data, error } = await sb.from('trades').select('id').in('user_id', activeIds).gt('id', sinceId).limit(1);
+      if (!error && data && data.length) needsScan = true;
+    }
+
+    if (needsScan){
+      container.innerHTML = '<p class="page-placeholder">המאמן סורק עסקאות חדשות…</p>';
+      const { context, maxId } = await buildInsightScanContext(group, sinceId);
+      try {
+        const res = await fetch('/api/group-insights', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ groupContext: context })
+        });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.cards) && data.cards.length){
+          const rows = data.cards.map(c => ({
+            group_id: group.id, member_name: c.memberName, category: c.category, title: c.title, body: c.body
+          }));
+          await sb.from('group_insights').insert(rows);
+        }
+        await sb.from('groups').update({ last_scanned_max_trade_id: maxId }).eq('id', group.id);
+        group.lastScannedMaxTradeId = maxId;
+      } catch (e){
+        console.error(e);
+      }
+    }
+
+    const { data: cardsData, error: cardsErr } = await sb.from('group_insights').select('*')
+      .eq('group_id', group.id).order('created_at', { ascending:false }).limit(20);
+    if (cardsErr){ console.error(cardsErr); container.innerHTML = '<p class="page-placeholder">שגיאה בטעינה</p>'; return; }
+    renderInsightCards(container, cardsData || []);
+  }
+
+  function renderMembersSection(outerContainer, group){
+    const layout = document.createElement('div');
+    layout.className = 'members-layout';
+    outerContainer.appendChild(layout);
+
+    const insightsCol = document.createElement('div');
+    insightsCol.className = 'insights-col';
+    insightsCol.innerHTML = `<h4>תובנות המאמן</h4><div id="groupInsightsFeed"><p class="page-placeholder">טוען…</p></div>`;
+    layout.appendChild(insightsCol);
+    loadGroupInsights(group);
+
+    const container = document.createElement('div');
+    container.className = 'members-col';
+    layout.appendChild(container);
+
     const activeMembers = group.members.filter(m => m.status === 'active');
     const otherMembers = group.members.filter(m => m.status !== 'active');
 
