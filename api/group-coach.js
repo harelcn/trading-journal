@@ -29,7 +29,7 @@ module.exports = async (req, res) => {
     const system = `${SYSTEM_PROMPT}\n\n--- נתוני חברי הקבוצה (מעודכן) ---\n${groupContext || 'אין נתונים.'}\n\n--- תמצית הצ'אט הקבוצתי המשותף (עד 30 הודעות אחרונות) ---\n${sharedChatContext || '(עדיין אין שיחה קבוצתית)'}\n\n--- הערוץ הנוכחי ---\n${channel === 'private' ? 'שיחה פרטית' : 'שיחה קבוצתית משותפת'}`;
 
     const response = await client.messages.create({
-      model: 'claude-opus-5',
+      model: 'claude-sonnet-5',
       max_tokens: 2048,
       system,
       messages: history.map(m => ({ role: m.role, content: m.content }))

@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
 
   try {
     const response = await client.messages.parse({
-      model: 'claude-opus-5',
+      model: 'claude-sonnet-5',
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{

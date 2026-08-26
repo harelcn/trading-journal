@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
 
   try {
     const response = await client.beta.messages.create({
-      model: 'claude-opus-5',
+      model: 'claude-sonnet-5',
       max_tokens: 4096,
       betas: ['compact-2026-01-12'],
       system: `${SYSTEM_PROMPT}\n\n--- נתוני העסקאות המעודכנים ---\n${tradesContext || 'אין עדיין עסקאות.'}`,
