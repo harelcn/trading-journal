@@ -638,7 +638,7 @@
     font-size:12px;
     color: var(--text-dim);
   }
-  .field input{
+  .field input, .field select{
     background: rgba(255,255,255,0.06);
     border:1px solid var(--border);
     border-radius:10px;
@@ -646,6 +646,26 @@
     color: var(--text);
     font-size:16px;
     width:100%;
+  }
+  .link-btn{
+    background:none;
+    border:1px dashed var(--accent);
+    border-radius:10px;
+    color: var(--accent);
+    font-size:13px;
+    font-weight:600;
+    padding:9px 12px;
+    cursor:pointer;
+    width:100%;
+  }
+  .linked-analysis-preview{
+    font-size:12px;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.04);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px 12px;
+    line-height:1.5;
   }
   .field input:focus{
     outline:none;
@@ -1408,12 +1428,16 @@
 
         <div class="accordion">
           <button type="button" class="accordion-header" data-accordion="tools">
-            <span>כלים וסימונים שהשתמשתי בהם</span>
+            <span>ניתוח מקושר</span>
             <span class="accordion-arrow">▾</span>
           </button>
           <div class="accordion-body" id="toolsAccordionBody">
-            <div class="tool-checklist" id="toolChecklist"></div>
-            <div class="tool-shots" id="toolShots"></div>
+            <div class="field">
+              <label for="analysisSelect">ניתוח של אותו יום</label>
+              <select id="analysisSelect"><option value="">ללא ניתוח מקושר</option></select>
+            </div>
+            <button type="button" class="link-btn" id="newAnalysisBtn">+ ניתוח חדש ליום זה</button>
+            <div id="linkedAnalysisPreview"></div>
           </div>
         </div>
 
@@ -1575,6 +1599,9 @@
   ];
   let currentConfidence = null;
   let openConfidenceInfo = null;
+  let currentAnalysisId = null;
+  let analysesForCurrentDate = [];
+  let analysesById = {};
 
   function pad2(n){ return String(n).padStart(2, '0'); }
   function dateToISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
@@ -1648,9 +1675,7 @@
     if (section) section.style.display = visible ? 'block' : 'none';
   }
 
-  function buildToolUI(){
-    const checklist = $('#toolChecklist');
-    const shots = $('#toolShots');
+  function buildToolUI(checklist, shots){
     checklist.innerHTML = '';
     shots.innerHTML = '';
     TOOL_DEFS.forEach(({ key, label }) => {
@@ -1690,7 +1715,6 @@
       shots.appendChild(section);
     });
   }
-  buildToolUI();
 
   setupDropZone($('#generalDropZone'), $('#generalImageInput'), async (files) => {
     setSyncStatus('מעלה תמונות…', 'loading');
@@ -1701,6 +1725,131 @@
     renderToolPreviews('general');
     setSyncStatus('מסונכרן ✓', 'ok');
   });
+
+  // ---- daily analyses ----
+  async function loadAnalysesForDate(date){
+    if (!currentUserId || !date){ analysesForCurrentDate = []; renderAnalysisSelect(); return; }
+    const { data, error } = await sb.from('daily_analyses').select('*')
+      .eq('user_id', currentUserId).eq('analysis_date', date)
+      .order('analysis_time', { ascending: true });
+    if (error){ console.error(error); analysesForCurrentDate = []; renderAnalysisSelect(); return; }
+    analysesForCurrentDate = data || [];
+    analysesForCurrentDate.forEach(a => { analysesById[a.id] = a; });
+    renderAnalysisSelect();
+  }
+
+  function renderAnalysisSelect(){
+    const sel = $('#analysisSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">ללא ניתוח מקושר</option>';
+    analysesForCurrentDate.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      const timeLabel = a.analysis_time ? a.analysis_time.slice(0,5) + ' · ' : '';
+      opt.textContent = `${timeLabel}${a.dir === 'long' ? 'לונג' : 'שורט'}`;
+      sel.appendChild(opt);
+    });
+    sel.value = analysesForCurrentDate.some(a => a.id === currentAnalysisId) ? currentAnalysisId : '';
+    if (sel.value !== currentAnalysisId) currentAnalysisId = sel.value || null;
+    renderLinkedAnalysisPreview();
+  }
+
+  function renderLinkedAnalysisPreview(){
+    const el = $('#linkedAnalysisPreview');
+    if (!el) return;
+    const a = currentAnalysisId ? analysesById[currentAnalysisId] : null;
+    if (!a){ el.innerHTML = ''; return; }
+    const toolsStr = (a.tools_used || []).map(k => (TOOL_DEFS.find(d=>d.key===k)||{}).label || k).join(', ');
+    el.innerHTML = `<div class="linked-analysis-preview">${toolsStr ? 'כלים: ' + escapeHtml(toolsStr) : 'אין כלים מסומנים'}${a.notes ? '<br>' + escapeHtml(a.notes.slice(0,150)) : ''}</div>`;
+  }
+
+  $('#analysisSelect').addEventListener('change', (e) => {
+    currentAnalysisId = e.target.value || null;
+    renderLinkedAnalysisPreview();
+  });
+
+  dateInput.addEventListener('change', () => {
+    currentAnalysisId = null;
+    loadAnalysesForDate(dateInput.value);
+  });
+
+  function openAnalysisModal(){
+    const prefillDate = dateInput.value || todayStr();
+    TOOL_DEFS.forEach(({ key }) => { toolImages[key] = []; });
+    let analysisDir = 'long';
+
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div class="field-row">
+        <div class="field">
+          <label for="analysisDateInput">תאריך</label>
+          <input type="date" id="analysisDateInput" value="${prefillDate}">
+        </div>
+        <div class="field">
+          <label for="analysisTimeInput">שעה</label>
+          <input type="time" id="analysisTimeInput">
+        </div>
+      </div>
+      <div class="dir-toggle" id="analysisDirToggle">
+        <button type="button" data-dir="long" class="active">לונג</button>
+        <button type="button" data-dir="short">שורט</button>
+      </div>
+      <div class="tool-checklist" id="analysisToolChecklist"></div>
+      <div class="tool-shots" id="analysisToolShots"></div>
+      <div class="field">
+        <label for="analysisNotes">הערות / תחזית</label>
+        <textarea id="analysisNotes" rows="4" placeholder="תאר את הניתוח, הציפיות והכיוון..."></textarea>
+      </div>
+      <div class="group-error" id="analysisErr"></div>
+      <button type="button" class="submit-btn" id="saveAnalysisBtn" style="width:100%;">שמור ניתוח</button>
+    `;
+
+    wrap.querySelectorAll('#analysisDirToggle button').forEach(b => {
+      b.addEventListener('click', () => {
+        analysisDir = b.dataset.dir;
+        wrap.querySelectorAll('#analysisDirToggle button').forEach(x => x.classList.toggle('active', x === b));
+      });
+    });
+
+    buildToolUI(wrap.querySelector('#analysisToolChecklist'), wrap.querySelector('#analysisToolShots'));
+
+    wrap.querySelector('#saveAnalysisBtn').addEventListener('click', async () => {
+      const date = wrap.querySelector('#analysisDateInput').value;
+      if (!date) return;
+      const saveBtn = wrap.querySelector('#saveAnalysisBtn');
+      const errEl = wrap.querySelector('#analysisErr');
+      saveBtn.disabled = true;
+      errEl.textContent = '';
+      const time = wrap.querySelector('#analysisTimeInput').value || null;
+      const notes = wrap.querySelector('#analysisNotes').value.trim();
+      const toolsUsed = Array.from(wrap.querySelectorAll('.tool-checkbox:checked')).map(cb => cb.dataset.tool);
+      const images = {};
+      TOOL_DEFS.forEach(({ key }) => {
+        if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
+      });
+
+      const { data, error } = await sb.from('daily_analyses').insert({
+        analysis_date: date, analysis_time: time, dir: analysisDir, notes, tools_used: toolsUsed, images
+      }).select().single();
+
+      saveBtn.disabled = false;
+      if (error){
+        errEl.textContent = error.message || 'שגיאה בשמירה';
+        return;
+      }
+      analysesById[data.id] = data;
+      closeModal();
+      if (dateInput.value === date){
+        await loadAnalysesForDate(date);
+        currentAnalysisId = data.id;
+        renderAnalysisSelect();
+      }
+    });
+
+    openModal('ניתוח חדש', wrap);
+  }
+
+  $('#newAnalysisBtn').addEventListener('click', openAnalysisModal);
 
   function buildConfidenceUI(){
     const wrap = $('#confidencePicker');
@@ -1806,7 +1955,9 @@
   function openTradeDetail(t){
     const wrap = document.createElement('div');
 
-    const usedLabels = TOOL_DEFS.filter(({key}) => (t.toolsUsed||[]).includes(key)).map(({label}) => label);
+    const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+    const toolsSource = tradeToolsUsed(t);
+    const usedLabels = TOOL_DEFS.filter(({key}) => toolsSource.includes(key)).map(({label}) => label);
     const checklistHtml = usedLabels.length
       ? `<div class="detail-tools">${usedLabels.map(l=>`<span class="detail-tool-chip">${l}</span>`).join('')}</div>`
       : '';
@@ -1816,17 +1967,41 @@
       ? `<div class="detail-tool-group"><div class="detail-label">תמונה כללית</div><div class="detail-images">${generalUrls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div></div>`
       : '';
 
-    let toolImagesHtml = '';
-    TOOL_DEFS.forEach(({ key, label }) => {
-      const urls = (t.images && t.images[key]) || [];
-      if (!urls.length) return;
-      toolImagesHtml += `
-        <div class="detail-tool-group">
-          <div class="detail-label">${label}</div>
-          <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
-        </div>`;
-    });
-    const hasStructuredImages = generalImagesHtml.length > 0 || toolImagesHtml.length > 0;
+    let analysisHtml = '';
+    if (analysis){
+      let analysisImagesHtml = '';
+      TOOL_DEFS.forEach(({ key, label }) => {
+        const urls = (analysis.images && analysis.images[key]) || [];
+        if (!urls.length) return;
+        analysisImagesHtml += `
+          <div class="detail-tool-group">
+            <div class="detail-label">${label}</div>
+            <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
+          </div>`;
+      });
+      const timeLabel = analysis.analysis_time ? analysis.analysis_time.slice(0,5) + ' · ' : '';
+      analysisHtml = `
+        <div class="detail-notes">
+          <span class="detail-label">ניתוח מקושר (${timeLabel}${analysis.dir==='long'?'לונג':'שורט'})</span>
+          ${analysis.notes ? `<div class="detail-notes-text">${escapeHtml(analysis.notes)}</div>` : ''}
+        </div>
+        ${analysisImagesHtml}
+      `;
+    }
+
+    let legacyToolImagesHtml = '';
+    if (!analysis){
+      TOOL_DEFS.forEach(({ key, label }) => {
+        const urls = (t.images && t.images[key]) || [];
+        if (!urls.length) return;
+        legacyToolImagesHtml += `
+          <div class="detail-tool-group">
+            <div class="detail-label">${label}</div>
+            <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
+          </div>`;
+      });
+    }
+    const hasStructuredImages = generalImagesHtml.length > 0 || analysisHtml.length > 0 || legacyToolImagesHtml.length > 0;
     const legacyImagesHtml = (!hasStructuredImages && (t.legacyImages||[]).length)
       ? `<div class="detail-tool-group"><div class="detail-label">תמונות</div><div class="detail-images">${t.legacyImages.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div></div>`
       : '';
@@ -1841,7 +2016,8 @@
       ${checklistHtml}
       ${t.notes ? `<div class="detail-notes"><span class="detail-label">פירוט ההחלטה</span><div class="detail-notes-text">${escapeHtml(t.notes)}</div></div>` : ''}
       ${generalImagesHtml}
-      ${toolImagesHtml}
+      ${analysisHtml}
+      ${legacyToolImagesHtml}
       ${legacyImagesHtml}
     `;
     wrap.querySelectorAll('.detail-img').forEach(img => {
@@ -1938,18 +2114,14 @@
     const date = dateInput.value;
     if (isNaN(entry) || isNaN(exit) || !date) return;
     const points = calcPoints(currentDir, entry, exit);
-    const toolsUsed = Array.from(document.querySelectorAll('.tool-checkbox:checked')).map(cb => cb.dataset.tool);
     const images = {};
-    TOOL_DEFS.forEach(({ key }) => {
-      if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
-    });
     if (toolImages.general.length) images.general = toolImages.general.map(img => img.url);
     const payload = {
       dir: currentDir, trade_date: date, trade_time: timeInput.value || null, entry_price: entry, exit_price: exit, points,
       notes: notesInput.value.trim(),
-      tools_used: toolsUsed,
       images,
-      confidence: currentConfidence
+      confidence: currentConfidence,
+      analysis_id: currentAnalysisId
     };
 
     const submitBtn = $('#submitBtn');
@@ -1985,14 +2157,10 @@
     dateInput.value = todayStr();
     timeInput.value = '';
     notesInput.value = '';
-    TOOL_DEFS.forEach(({ key }) => {
-      toolImages[key] = [];
-      renderToolPreviews(key);
-      setToolSectionVisible(key, false);
-    });
     toolImages.general = [];
     renderToolPreviews('general');
-    document.querySelectorAll('.tool-checkbox').forEach(cb => { cb.checked = false; });
+    currentAnalysisId = null;
+    loadAnalysesForDate(dateInput.value);
     setAccordionOpen('tools', false);
     setAccordionOpen('notes', false);
     setDir('long');
@@ -2016,20 +2184,12 @@
     entryInput.value = t.entry;
     exitInput.value = t.exit;
     notesInput.value = t.notes || '';
-    const usedSet = new Set(t.toolsUsed || []);
-    TOOL_DEFS.forEach(({ key }) => {
-      const urls = (t.images && t.images[key]) || [];
-      toolImages[key] = urls.map(url => ({ path: pathFromPublicUrl(url), url }));
-      renderToolPreviews(key);
-      const isUsed = usedSet.has(key) || urls.length > 0;
-      const cb = document.querySelector(`.tool-checkbox[data-tool="${key}"]`);
-      if (cb) cb.checked = isUsed;
-      setToolSectionVisible(key, isUsed);
-    });
     const generalUrls = (t.images && t.images.general) || [];
     toolImages.general = generalUrls.map(url => ({ path: pathFromPublicUrl(url), url }));
     renderToolPreviews('general');
-    setAccordionOpen('tools', usedSet.size > 0);
+    currentAnalysisId = t.analysisId || null;
+    loadAnalysesForDate(t.date);
+    setAccordionOpen('tools', !!currentAnalysisId);
     setAccordionOpen('notes', !!(t.notes && t.notes.trim()));
     setConfidence(t.confidence || null);
     closeConfidenceInfo();
@@ -2060,7 +2220,8 @@
       toolsUsed: r.tools_used || [],
       images: r.images || {},
       legacyImages: r.image_urls || [],
-      confidence: r.confidence || null
+      confidence: r.confidence || null,
+      analysisId: r.analysis_id || null
     };
   }
 
@@ -2086,6 +2247,19 @@
     trades = (data || []).map(rowToTrade);
     setSyncStatus('מסונכרן ✓', 'ok');
     render();
+    loadAllAnalysesForUser(currentUserId);
+    loadAnalysesForDate(dateInput.value);
+  }
+
+  async function loadAllAnalysesForUser(userId){
+    const { data, error } = await sb.from('daily_analyses').select('*').eq('user_id', userId);
+    if (error){ console.error(error); return; }
+    (data || []).forEach(a => { analysesById[a.id] = a; });
+  }
+
+  function tradeToolsUsed(t){
+    if (t.analysisId && analysesById[t.analysisId]) return analysesById[t.analysisId].tools_used || [];
+    return t.toolsUsed || [];
   }
 
   async function deleteTrade(id){
@@ -2245,6 +2419,7 @@
     if (selectedMemberId !== userId) return;
     selectedMemberTrades = (data || []).map(rowToTrade);
     renderGroupPage();
+    loadAllAnalysesForUser(userId);
   }
 
   async function buildGroupContext(groupId){
@@ -2253,9 +2428,16 @@
     const activeMembers = group.members.filter(m => m.status === 'active' && m.user_id);
     const ids = activeMembers.map(m => m.user_id);
     if (!ids.length) return 'אין עדיין חברים פעילים בקבוצה.';
-    const { data, error } = await sb.from('trades').select('user_id, points, tools_used').in('user_id', ids);
+    const { data, error } = await sb.from('trades').select('user_id, points, tools_used, analysis_id').in('user_id', ids);
     if (error){ console.error(error); return ''; }
     const rows = data || [];
+    const analysisIds = [...new Set(rows.map(r => r.analysis_id).filter(Boolean))];
+    const analysesMap = {};
+    if (analysisIds.length){
+      const { data: analysisRows } = await sb.from('daily_analyses').select('id, tools_used').in('id', analysisIds);
+      (analysisRows || []).forEach(a => { analysesMap[a.id] = a; });
+    }
+    const rowToolsUsed = (r) => (r.analysis_id && analysesMap[r.analysis_id] ? analysesMap[r.analysis_id].tools_used : r.tools_used) || [];
     let out = `קבוצה: ${group.name}\n\n`;
     activeMembers.forEach(m => {
       const name = memberDisplayName(m);
@@ -2265,7 +2447,7 @@
       const winRate = total ? (wins/total*100).toFixed(1) : '0';
       const totalPoints = myRows.reduce((s,r) => s+Number(r.points), 0);
       const toolCounts = {};
-      myRows.forEach(r => (r.tools_used || []).forEach(t => { toolCounts[t] = (toolCounts[t]||0) + 1; }));
+      myRows.forEach(r => rowToolsUsed(r).forEach(t => { toolCounts[t] = (toolCounts[t]||0) + 1; }));
       const toolsStr = Object.entries(toolCounts)
         .map(([k,v]) => `${(TOOL_DEFS.find(d=>d.key===k)||{}).label || k}:${v}`).join(', ') || 'אין נתוני כלים';
       out += `--- ${name} ---\nעסקאות: ${total} | win rate: ${winRate}% | סה"כ נקודות: ${fmtPoints(totalPoints)}\nשימוש בכלים: ${toolsStr}\n\n`;
@@ -2396,9 +2578,16 @@
     const ids = activeMembers.map(m => m.user_id);
     if (!ids.length) return { context: '', maxId: sinceTradeId };
     const { data, error } = await sb.from('trades')
-      .select('id, user_id, dir, trade_date, points, tools_used, confidence, notes').in('user_id', ids).order('id');
+      .select('id, user_id, dir, trade_date, points, tools_used, confidence, notes, analysis_id').in('user_id', ids).order('id');
     if (error){ console.error(error); return { context: '', maxId: sinceTradeId }; }
     const rows = data || [];
+    const analysisIds = [...new Set(rows.map(r => r.analysis_id).filter(Boolean))];
+    const analysesMap = {};
+    if (analysisIds.length){
+      const { data: analysisRows } = await sb.from('daily_analyses').select('id, tools_used').in('id', analysisIds);
+      (analysisRows || []).forEach(a => { analysesMap[a.id] = a; });
+    }
+    const rowToolsUsed = (r) => (r.analysis_id && analysesMap[r.analysis_id] ? analysesMap[r.analysis_id].tools_used : r.tools_used) || [];
     const maxId = rows.reduce((m,r) => Math.max(m, r.id), sinceTradeId);
     let out = `קבוצה: ${group.name}\n\n`;
     activeMembers.forEach(m => {
@@ -2413,7 +2602,7 @@
       if (newRows.length){
         out += `עסקאות חדשות שטרם נותחו (${newRows.length}):\n`;
         newRows.forEach(r => {
-          const toolsStr = (r.tools_used || []).map(k => (TOOL_DEFS.find(d=>d.key===k)||{}).label || k).join(', ') || 'ללא';
+          const toolsStr = rowToolsUsed(r).map(k => (TOOL_DEFS.find(d=>d.key===k)||{}).label || k).join(', ') || 'ללא';
           out += `  - ${r.trade_date} | ${r.dir==='long'?'לונג':'שורט'} | ${fmtPoints(Number(r.points))} נק' | ביטחון: ${r.confidence || 'לא צוין'} | כלים: ${toolsStr}${r.notes ? ' | הערות: ' + r.notes.slice(0,150) : ''}\n`;
         });
       } else {
@@ -2920,7 +3109,7 @@
     let out = `סטטיסטיקה כללית:\nסה"כ עסקאות: ${total}\nניצחונות: ${wins.length} | הפסדים: ${losses.length}\nWin rate: ${winRate}%\nסה"כ נקודות: ${fmtPoints(totalPts)}\nממוצע רווח בעסקה מנצחת: ${avgWin}\nממוצע הפסד בעסקה מפסידה: ${avgLoss}\n\nסטטיסטיקה לפי כלי:\n`;
 
     TOOL_DEFS.forEach(({ key, label }) => {
-      const withTool = trades.filter(t => (t.toolsUsed||[]).includes(key));
+      const withTool = trades.filter(t => tradeToolsUsed(t).includes(key));
       if (withTool.length === 0) return;
       const toolWins = withTool.filter(t => t.points > 0).length;
       const toolWinRate = (toolWins / withTool.length * 100).toFixed(1);
@@ -2944,12 +3133,15 @@
     out += '\nרשימת עסקאות (מהאחרונה לראשונה, עד 150):\n';
     const sorted = trades.slice().sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id).slice(0, 150);
     sorted.forEach(t => {
-      const toolsStr = (t.toolsUsed||[]).length
-        ? t.toolsUsed.map(k => (TOOL_DEFS.find(d => d.key === k)||{}).label || k).join(', ')
+      const tTools = tradeToolsUsed(t);
+      const toolsStr = tTools.length
+        ? tTools.map(k => (TOOL_DEFS.find(d => d.key === k)||{}).label || k).join(', ')
         : 'לא צוין';
+      const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+      const analysisNotesStr = analysis && analysis.notes ? ` | ניתוח היום: ${analysis.notes.slice(0,200)}` : '';
       const notesStr = t.notes ? ` | הערות: ${t.notes.slice(0,200)}` : '';
       const confStr = t.confidence ? ` | ביטחון: ${t.confidence}/5` : '';
-      out += `${t.date} | ${t.dir==='long'?'לונג':'שורט'} | כניסה ${t.entry} יציאה ${t.exit} | ${fmtPoints(t.points)} נק'${confStr} | כלים: ${toolsStr}${notesStr}\n`;
+      out += `${t.date}${t.time ? ' ' + t.time : ''} | ${t.dir==='long'?'לונג':'שורט'} | כניסה ${t.entry} יציאה ${t.exit} | ${fmtPoints(t.points)} נק'${confStr} | כלים: ${toolsStr}${analysisNotesStr}${notesStr}\n`;
     });
 
     return out;
@@ -2979,11 +3171,22 @@
   function collectAllTradeImages(){
     const sorted = trades.slice().sort((a,b) => parseLocal(b.date) - parseLocal(a.date) || b.id - a.id);
     const out = [];
+    const seenAnalysisIds = new Set();
     sorted.forEach(t => {
       ((t.images && t.images.general) || []).forEach(url => out.push({ url, date: t.date, label: 'תמונה כללית' }));
-      TOOL_DEFS.forEach(({ key, label }) => {
-        ((t.images && t.images[key]) || []).forEach(url => out.push({ url, date: t.date, label }));
-      });
+      const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+      if (analysis){
+        if (!seenAnalysisIds.has(analysis.id)){
+          seenAnalysisIds.add(analysis.id);
+          TOOL_DEFS.forEach(({ key, label }) => {
+            ((analysis.images && analysis.images[key]) || []).forEach(url => out.push({ url, date: analysis.analysis_date, label: `${label} (ניתוח)` }));
+          });
+        }
+      } else {
+        TOOL_DEFS.forEach(({ key, label }) => {
+          ((t.images && t.images[key]) || []).forEach(url => out.push({ url, date: t.date, label }));
+        });
+      }
       (t.legacyImages || []).forEach(url => out.push({ url, date: t.date, label: 'תמונה' }));
     });
     return out;
