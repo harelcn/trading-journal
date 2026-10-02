@@ -885,6 +885,29 @@
     font-weight:700;
   }
 
+  .cal-nav{
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    margin-top:10px;
+  }
+  .cal-nav button{
+    width:34px;
+    height:34px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    font-size:16px;
+    cursor:pointer;
+  }
+  .cal-nav button:hover{ border-color: var(--accent); color: var(--accent); }
+  #calMonthLabel{
+    font-size:14px;
+    font-weight:700;
+    color: var(--text);
+  }
+
   /* ---------- Monthly calendar ---------- */
   .cal-grid{
     display:none;
@@ -1346,9 +1369,15 @@
           <button type="button" data-dir="long" class="active">לונג</button>
           <button type="button" data-dir="short">שורט</button>
         </div>
-        <div class="field">
-          <label for="tradeDate">תאריך</label>
-          <input type="date" id="tradeDate" required>
+        <div class="field-row">
+          <div class="field">
+            <label for="tradeDate">תאריך</label>
+            <input type="date" id="tradeDate" required>
+          </div>
+          <div class="field">
+            <label for="tradeTime">שעה (לא חובה)</label>
+            <input type="time" id="tradeTime">
+          </div>
         </div>
         <div class="field-row">
           <div class="field">
@@ -1416,6 +1445,11 @@
       <div class="month-view-toggle" id="monthViewToggle">
         <button data-view="calendar" class="active">יומן</button>
         <button data-view="list">עסקאות</button>
+      </div>
+      <div class="cal-nav" id="calNav" style="display:none">
+        <button type="button" id="calPrevMonth">‹</button>
+        <span id="calMonthLabel"></span>
+        <button type="button" id="calNextMonth">›</button>
       </div>
       <div class="interval-summary" id="intervalSummary"></div>
       <div class="trades-list" id="tradesList"></div>
@@ -1508,6 +1542,7 @@
   let trades = [];
   let currentFilter = 'day';
   let monthView = 'calendar';
+  let viewingMonthDate = new Date();
   let currentDir = 'long';
   let editingId = null;
 
@@ -1515,6 +1550,7 @@
   const entryInput = $('#entryPrice');
   const exitInput = $('#exitPrice');
   const dateInput = $('#tradeDate');
+  const timeInput = $('#tradeTime');
   const notesInput = $('#tradeNotes');
   dateInput.value = todayStr();
 
@@ -1797,7 +1833,7 @@
 
     wrap.innerHTML = `
       <div class="detail-row"><span class="detail-label">כיוון</span><span class="trade-dir ${t.dir}">${t.dir==='long'?'לונג':'שורט'}</span></div>
-      <div class="detail-row"><span class="detail-label">תאריך</span><span>${formatDisplayDate(t.date)}</span></div>
+      <div class="detail-row"><span class="detail-label">תאריך</span><span>${formatDisplayDate(t.date)}${t.time ? ' · ' + t.time : ''}</span></div>
       <div class="detail-row"><span class="detail-label">סכום כניסה</span><span>${t.entry}</span></div>
       <div class="detail-row"><span class="detail-label">סכום יציאה</span><span>${t.exit}</span></div>
       <div class="detail-row"><span class="detail-label">נקודות</span><span class="${pointsClass(t.points)}">${fmtPoints(t.points)}</span></div>
@@ -1909,7 +1945,7 @@
     });
     if (toolImages.general.length) images.general = toolImages.general.map(img => img.url);
     const payload = {
-      dir: currentDir, trade_date: date, entry_price: entry, exit_price: exit, points,
+      dir: currentDir, trade_date: date, trade_time: timeInput.value || null, entry_price: entry, exit_price: exit, points,
       notes: notesInput.value.trim(),
       tools_used: toolsUsed,
       images,
@@ -1947,6 +1983,7 @@
     entryInput.value = '';
     exitInput.value = '';
     dateInput.value = todayStr();
+    timeInput.value = '';
     notesInput.value = '';
     TOOL_DEFS.forEach(({ key }) => {
       toolImages[key] = [];
@@ -1975,6 +2012,7 @@
     editingId = t.id;
     setDir(t.dir);
     dateInput.value = t.date;
+    timeInput.value = t.time || '';
     entryInput.value = t.entry;
     exitInput.value = t.exit;
     notesInput.value = t.notes || '';
@@ -2014,6 +2052,7 @@
       id: r.id,
       dir: r.dir,
       date: r.trade_date,
+      time: r.trade_time || '',
       entry: Number(r.entry_price),
       exit: Number(r.exit_price),
       points: Number(r.points),
@@ -2703,8 +2742,7 @@
   }
 
   function buildMonthWeeks(){
-    const now = new Date();
-    const year = now.getFullYear(), month = now.getMonth();
+    const year = viewingMonthDate.getFullYear(), month = viewingMonthDate.getMonth();
     const firstOfMonth = new Date(year, month, 1);
     const lastOfMonth = new Date(year, month + 1, 0);
     const weeks = [];
@@ -2721,12 +2759,22 @@
       weekStart = new Date(weekStart);
       weekStart.setDate(weekStart.getDate() + 7);
     }
-    return { weeks, month };
+    return { weeks, month, year };
   }
 
+  const MONTH_NAMES = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+
+  function changeViewingMonth(delta){
+    viewingMonthDate = new Date(viewingMonthDate.getFullYear(), viewingMonthDate.getMonth() + delta, 1);
+    render();
+  }
+  $('#calPrevMonth').addEventListener('click', () => changeViewingMonth(-1));
+  $('#calNextMonth').addEventListener('click', () => changeViewingMonth(1));
+
   function renderCalendar(){
-    const { weeks, month } = buildMonthWeeks();
+    const { weeks, month, year } = buildMonthWeeks();
     const dayNames = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת','סה"כ'];
+    $('#calMonthLabel').textContent = `${MONTH_NAMES[month]} ${year}`;
 
     let html = dayNames.map(n => `<div class="cal-head">${n}</div>`).join('');
 
@@ -2781,7 +2829,7 @@
         return d >= ws && d <= we;
       });
     } else if (currentFilter === 'month'){
-      list = list.filter(t => isSameMonth(parseLocal(t.date), now));
+      list = list.filter(t => isSameMonth(parseLocal(t.date), viewingMonthDate));
     }
 
     const filterLabels = { day:'יומי', week:'שבועי', month:'חודשי', all:'הכל' };
@@ -2794,6 +2842,7 @@
     const isMonth = currentFilter === 'month';
     $('#monthViewToggle').style.display = isMonth ? 'flex' : 'none';
     const showCalendar = isMonth && monthView === 'calendar';
+    $('#calNav').style.display = showCalendar ? 'flex' : 'none';
     $('#calGrid').style.display = showCalendar ? 'grid' : 'none';
     $('#tradesList').style.display = showCalendar ? 'none' : 'flex';
     if (showCalendar){
