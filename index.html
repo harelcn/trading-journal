@@ -647,25 +647,42 @@
     font-size:16px;
     width:100%;
   }
-  .link-btn{
-    background:none;
-    border:1px dashed var(--accent);
-    border-radius:10px;
-    color: var(--accent);
-    font-size:13px;
-    font-weight:600;
-    padding:9px 12px;
-    cursor:pointer;
-    width:100%;
+  .analysis-card{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
   }
-  .linked-analysis-preview{
-    font-size:12px;
-    color: var(--text-dim);
-    background: rgba(255,255,255,0.04);
+  .analysis-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .analysis-head .form-title{ margin:0; }
+  .analysis-head input{
+    background: rgba(255,255,255,0.06);
     border:1px solid var(--border);
     border-radius:10px;
-    padding:10px 12px;
-    line-height:1.5;
+    padding:8px 10px;
+    color: var(--text);
+    font-size:16px;
+  }
+  .analysis-sub{
+    margin:0;
+    font-size:12px;
+    color: var(--text-dim);
+  }
+  .analysis-sub.saved{ color: var(--green); }
+  .analysis-card textarea{
+    background: rgba(255,255,255,0.06);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px;
+    color: var(--text);
+    font-size:16px;
+    width:100%;
+    resize:vertical;
+    font-family:inherit;
   }
   .field input:focus{
     outline:none;
@@ -1310,11 +1327,14 @@
       grid-template-columns: 380px 1fr;
       grid-template-areas:
         "summary summary"
+        "analysis analysis"
         "form list";
       gap:20px;
       padding: 28px 32px 60px;
     }
     .summary-card{ grid-area: summary; }
+    .analysis-card{ grid-area: analysis; }
+    .analysis-card .tool-checklist{ flex-direction:row; flex-wrap:wrap; }
     .form-card{ grid-area: form; align-self:start; position:sticky; top:28px; }
     .list-card{ grid-area: list; align-self:start; }
     .summary{
@@ -1381,6 +1401,23 @@
       </div>
     </div>
 
+    <!-- Daily Analysis -->
+    <div class="card analysis-card">
+      <div class="analysis-head">
+        <p class="form-title">ניתוח יומי</p>
+        <input type="date" id="analysisDate">
+      </div>
+      <p class="analysis-sub" id="analysisStatus">כל העסקאות של היום הזה ינותחו מול הניתוח הזה</p>
+      <div class="tool-checklist" id="analysisToolChecklist"></div>
+      <div class="tool-shots" id="analysisToolShots"></div>
+      <div class="field">
+        <label for="analysisNotes">מחשבות, תחזיות ומסקנות</label>
+        <textarea id="analysisNotes" rows="5" placeholder="מה ראית בגרף היום, מה התחזית, מה המסקנות..."></textarea>
+      </div>
+      <div class="group-error" id="analysisErr"></div>
+      <button type="button" class="submit-btn" id="saveAnalysisBtn">שמור ניתוח יומי</button>
+    </div>
+
     <!-- Add Trade Form -->
     <div class="card form-card">
       <p class="form-title" id="formTitle">עסקה חדשה</p>
@@ -1426,20 +1463,6 @@
           <div class="image-previews" data-tool-preview="general"></div>
         </div>
 
-        <div class="accordion">
-          <button type="button" class="accordion-header" data-accordion="tools">
-            <span>ניתוח מקושר</span>
-            <span class="accordion-arrow">▾</span>
-          </button>
-          <div class="accordion-body" id="toolsAccordionBody">
-            <div class="field">
-              <label for="analysisSelect">ניתוח של אותו יום</label>
-              <select id="analysisSelect"><option value="">ללא ניתוח מקושר</option></select>
-            </div>
-            <button type="button" class="link-btn" id="newAnalysisBtn">+ ניתוח חדש ליום זה</button>
-            <div id="linkedAnalysisPreview"></div>
-          </div>
-        </div>
 
         <div class="accordion">
           <button type="button" class="accordion-header" data-accordion="notes">
@@ -1599,9 +1622,6 @@
   ];
   let currentConfidence = null;
   let openConfidenceInfo = null;
-  let currentAnalysisId = null;
-  let analysesForCurrentDate = [];
-  let analysesById = {};
 
   function pad2(n){ return String(n).padStart(2, '0'); }
   function dateToISO(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
@@ -1726,130 +1746,93 @@
     setSyncStatus('מסונכרן ✓', 'ok');
   });
 
-  // ---- daily analyses ----
-  async function loadAnalysesForDate(date){
-    if (!currentUserId || !date){ analysesForCurrentDate = []; renderAnalysisSelect(); return; }
+  // ---- daily analysis (one per user per day; trades link by date) ----
+  let analysesByKey = {};
+  const analysisKey = (userId, date) => `${userId}|${date}`;
+  const analysisDateInput = $('#analysisDate');
+  analysisDateInput.value = todayStr();
+
+  buildToolUI($('#analysisToolChecklist'), $('#analysisToolShots'));
+
+  function analysisForTrade(t){
+    return analysesByKey[analysisKey(t.userId, t.date)] || null;
+  }
+
+  function fillAnalysisForm(a){
+    const used = new Set((a && a.tools_used) || []);
+    TOOL_DEFS.forEach(({ key }) => {
+      const urls = (a && a.images && a.images[key]) || [];
+      toolImages[key] = urls.map(url => ({ path: pathFromPublicUrl(url), url }));
+      renderToolPreviews(key);
+      const isUsed = used.has(key) || urls.length > 0;
+      const cb = document.querySelector(`#analysisToolChecklist .tool-checkbox[data-tool="${key}"]`);
+      if (cb) cb.checked = isUsed;
+      setToolSectionVisible(key, isUsed);
+    });
+    $('#analysisNotes').value = (a && a.notes) || '';
+    const status = $('#analysisStatus');
+    status.textContent = a ? 'יש ניתוח שמור ליום הזה — אפשר לעדכן' : 'עדיין אין ניתוח ליום הזה. כל העסקאות של היום ינותחו מולו';
+    status.classList.toggle('saved', !!a);
+    $('#analysisErr').textContent = '';
+  }
+
+  async function loadAnalysisForm(){
+    const date = analysisDateInput.value;
+    if (!currentUserId || !date){ fillAnalysisForm(null); return; }
     const { data, error } = await sb.from('daily_analyses').select('*')
-      .eq('user_id', currentUserId).eq('analysis_date', date)
-      .order('analysis_time', { ascending: true });
-    if (error){ console.error(error); analysesForCurrentDate = []; renderAnalysisSelect(); return; }
-    analysesForCurrentDate = data || [];
-    analysesForCurrentDate.forEach(a => { analysesById[a.id] = a; });
-    renderAnalysisSelect();
+      .eq('user_id', currentUserId).eq('analysis_date', date).maybeSingle();
+    if (error){
+      console.error(error);
+      fillAnalysisForm(null);
+      $('#analysisErr').textContent = error.message || 'שגיאה בטעינת הניתוח';
+      return;
+    }
+    if (data) analysesByKey[analysisKey(data.user_id, data.analysis_date)] = data;
+    fillAnalysisForm(data);
   }
 
-  function renderAnalysisSelect(){
-    const sel = $('#analysisSelect');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">ללא ניתוח מקושר</option>';
-    analysesForCurrentDate.forEach(a => {
-      const opt = document.createElement('option');
-      opt.value = a.id;
-      const timeLabel = a.analysis_time ? a.analysis_time.slice(0,5) + ' · ' : '';
-      opt.textContent = `${timeLabel}${a.dir === 'long' ? 'לונג' : 'שורט'}`;
-      sel.appendChild(opt);
+  analysisDateInput.addEventListener('change', loadAnalysisForm);
+
+  $('#saveAnalysisBtn').addEventListener('click', async () => {
+    const date = analysisDateInput.value;
+    if (!date) return;
+    const btn = $('#saveAnalysisBtn');
+    const errEl = $('#analysisErr');
+    btn.disabled = true;
+    errEl.textContent = '';
+    const toolsUsed = Array.from(document.querySelectorAll('#analysisToolChecklist .tool-checkbox:checked')).map(cb => cb.dataset.tool);
+    const images = {};
+    TOOL_DEFS.forEach(({ key }) => {
+      if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
     });
-    sel.value = analysesForCurrentDate.some(a => a.id === currentAnalysisId) ? currentAnalysisId : '';
-    if (sel.value !== currentAnalysisId) currentAnalysisId = sel.value || null;
-    renderLinkedAnalysisPreview();
-  }
-
-  function renderLinkedAnalysisPreview(){
-    const el = $('#linkedAnalysisPreview');
-    if (!el) return;
-    const a = currentAnalysisId ? analysesById[currentAnalysisId] : null;
-    if (!a){ el.innerHTML = ''; return; }
-    const toolsStr = (a.tools_used || []).map(k => (TOOL_DEFS.find(d=>d.key===k)||{}).label || k).join(', ');
-    el.innerHTML = `<div class="linked-analysis-preview">${toolsStr ? 'כלים: ' + escapeHtml(toolsStr) : 'אין כלים מסומנים'}${a.notes ? '<br>' + escapeHtml(a.notes.slice(0,150)) : ''}</div>`;
-  }
-
-  $('#analysisSelect').addEventListener('change', (e) => {
-    currentAnalysisId = e.target.value || null;
-    renderLinkedAnalysisPreview();
+    const { data, error } = await sb.from('daily_analyses').upsert({
+      user_id: currentUserId,
+      analysis_date: date,
+      notes: $('#analysisNotes').value.trim(),
+      tools_used: toolsUsed,
+      images
+    }, { onConflict: 'user_id,analysis_date' }).select().single();
+    btn.disabled = false;
+    if (error){
+      errEl.textContent = error.message || 'שגיאה בשמירה';
+      return;
+    }
+    analysesByKey[analysisKey(data.user_id, data.analysis_date)] = data;
+    fillAnalysisForm(data);
+    render();
   });
 
-  dateInput.addEventListener('change', () => {
-    currentAnalysisId = null;
-    loadAnalysesForDate(dateInput.value);
-  });
-
-  function openAnalysisModal(){
-    const prefillDate = dateInput.value || todayStr();
-    TOOL_DEFS.forEach(({ key }) => { toolImages[key] = []; });
-    let analysisDir = 'long';
-
-    const wrap = document.createElement('div');
-    wrap.innerHTML = `
-      <div class="field-row">
-        <div class="field">
-          <label for="analysisDateInput">תאריך</label>
-          <input type="date" id="analysisDateInput" value="${prefillDate}">
-        </div>
-        <div class="field">
-          <label for="analysisTimeInput">שעה</label>
-          <input type="time" id="analysisTimeInput">
-        </div>
-      </div>
-      <div class="dir-toggle" id="analysisDirToggle">
-        <button type="button" data-dir="long" class="active">לונג</button>
-        <button type="button" data-dir="short">שורט</button>
-      </div>
-      <div class="tool-checklist" id="analysisToolChecklist"></div>
-      <div class="tool-shots" id="analysisToolShots"></div>
-      <div class="field">
-        <label for="analysisNotes">הערות / תחזית</label>
-        <textarea id="analysisNotes" rows="4" placeholder="תאר את הניתוח, הציפיות והכיוון..."></textarea>
-      </div>
-      <div class="group-error" id="analysisErr"></div>
-      <button type="button" class="submit-btn" id="saveAnalysisBtn" style="width:100%;">שמור ניתוח</button>
-    `;
-
-    wrap.querySelectorAll('#analysisDirToggle button').forEach(b => {
-      b.addEventListener('click', () => {
-        analysisDir = b.dataset.dir;
-        wrap.querySelectorAll('#analysisDirToggle button').forEach(x => x.classList.toggle('active', x === b));
-      });
-    });
-
-    buildToolUI(wrap.querySelector('#analysisToolChecklist'), wrap.querySelector('#analysisToolShots'));
-
-    wrap.querySelector('#saveAnalysisBtn').addEventListener('click', async () => {
-      const date = wrap.querySelector('#analysisDateInput').value;
-      if (!date) return;
-      const saveBtn = wrap.querySelector('#saveAnalysisBtn');
-      const errEl = wrap.querySelector('#analysisErr');
-      saveBtn.disabled = true;
-      errEl.textContent = '';
-      const time = wrap.querySelector('#analysisTimeInput').value || null;
-      const notes = wrap.querySelector('#analysisNotes').value.trim();
-      const toolsUsed = Array.from(wrap.querySelectorAll('.tool-checkbox:checked')).map(cb => cb.dataset.tool);
-      const images = {};
-      TOOL_DEFS.forEach(({ key }) => {
-        if (toolImages[key].length) images[key] = toolImages[key].map(img => img.url);
-      });
-
-      const { data, error } = await sb.from('daily_analyses').insert({
-        analysis_date: date, analysis_time: time, dir: analysisDir, notes, tools_used: toolsUsed, images
-      }).select().single();
-
-      saveBtn.disabled = false;
-      if (error){
-        errEl.textContent = error.message || 'שגיאה בשמירה';
-        return;
-      }
-      analysesById[data.id] = data;
-      closeModal();
-      if (dateInput.value === date){
-        await loadAnalysesForDate(date);
-        currentAnalysisId = data.id;
-        renderAnalysisSelect();
-      }
-    });
-
-    openModal('ניתוח חדש', wrap);
+  async function loadAllAnalysesForUser(userId){
+    const { data, error } = await sb.from('daily_analyses').select('*').eq('user_id', userId);
+    if (error){ console.error(error); return; }
+    (data || []).forEach(a => { analysesByKey[analysisKey(a.user_id, a.analysis_date)] = a; });
   }
 
-  $('#newAnalysisBtn').addEventListener('click', openAnalysisModal);
+  function tradeToolsUsed(t){
+    const a = analysisForTrade(t);
+    if (a && (a.tools_used || []).length) return a.tools_used;
+    return t.toolsUsed || [];
+  }
 
   function buildConfidenceUI(){
     const wrap = $('#confidencePicker');
@@ -1955,7 +1938,7 @@
   function openTradeDetail(t){
     const wrap = document.createElement('div');
 
-    const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+    const analysis = analysisForTrade(t);
     const toolsSource = tradeToolsUsed(t);
     const usedLabels = TOOL_DEFS.filter(({key}) => toolsSource.includes(key)).map(({label}) => label);
     const checklistHtml = usedLabels.length
@@ -1979,10 +1962,9 @@
             <div class="detail-images">${urls.map(url=>`<img src="${url}" class="detail-img">`).join('')}</div>
           </div>`;
       });
-      const timeLabel = analysis.analysis_time ? analysis.analysis_time.slice(0,5) + ' · ' : '';
       analysisHtml = `
         <div class="detail-notes">
-          <span class="detail-label">ניתוח מקושר (${timeLabel}${analysis.dir==='long'?'לונג':'שורט'})</span>
+          <span class="detail-label">הניתוח היומי של אותו יום</span>
           ${analysis.notes ? `<div class="detail-notes-text">${escapeHtml(analysis.notes)}</div>` : ''}
         </div>
         ${analysisImagesHtml}
@@ -2120,8 +2102,7 @@
       dir: currentDir, trade_date: date, trade_time: timeInput.value || null, entry_price: entry, exit_price: exit, points,
       notes: notesInput.value.trim(),
       images,
-      confidence: currentConfidence,
-      analysis_id: currentAnalysisId
+      confidence: currentConfidence
     };
 
     const submitBtn = $('#submitBtn');
@@ -2159,9 +2140,6 @@
     notesInput.value = '';
     toolImages.general = [];
     renderToolPreviews('general');
-    currentAnalysisId = null;
-    loadAnalysesForDate(dateInput.value);
-    setAccordionOpen('tools', false);
     setAccordionOpen('notes', false);
     setDir('long');
     setConfidence(null);
@@ -2187,9 +2165,6 @@
     const generalUrls = (t.images && t.images.general) || [];
     toolImages.general = generalUrls.map(url => ({ path: pathFromPublicUrl(url), url }));
     renderToolPreviews('general');
-    currentAnalysisId = t.analysisId || null;
-    loadAnalysesForDate(t.date);
-    setAccordionOpen('tools', !!currentAnalysisId);
     setAccordionOpen('notes', !!(t.notes && t.notes.trim()));
     setConfidence(t.confidence || null);
     closeConfidenceInfo();
@@ -2221,7 +2196,7 @@
       images: r.images || {},
       legacyImages: r.image_urls || [],
       confidence: r.confidence || null,
-      analysisId: r.analysis_id || null
+      userId: r.user_id
     };
   }
 
@@ -2248,18 +2223,7 @@
     setSyncStatus('מסונכרן ✓', 'ok');
     render();
     loadAllAnalysesForUser(currentUserId);
-    loadAnalysesForDate(dateInput.value);
-  }
-
-  async function loadAllAnalysesForUser(userId){
-    const { data, error } = await sb.from('daily_analyses').select('*').eq('user_id', userId);
-    if (error){ console.error(error); return; }
-    (data || []).forEach(a => { analysesById[a.id] = a; });
-  }
-
-  function tradeToolsUsed(t){
-    if (t.analysisId && analysesById[t.analysisId]) return analysesById[t.analysisId].tools_used || [];
-    return t.toolsUsed || [];
+    loadAnalysisForm();
   }
 
   async function deleteTrade(id){
@@ -2422,22 +2386,26 @@
     loadAllAnalysesForUser(userId);
   }
 
+  async function buildRowToolsResolver(userIds){
+    const { data } = await sb.from('daily_analyses').select('user_id, analysis_date, tools_used').in('user_id', userIds);
+    const map = {};
+    (data || []).forEach(a => { map[analysisKey(a.user_id, a.analysis_date)] = a.tools_used || []; });
+    return (r) => {
+      const fromDay = map[analysisKey(r.user_id, r.trade_date)];
+      return (fromDay && fromDay.length ? fromDay : r.tools_used) || [];
+    };
+  }
+
   async function buildGroupContext(groupId){
     const group = myGroups.find(g => g.id === groupId);
     if (!group) return '';
     const activeMembers = group.members.filter(m => m.status === 'active' && m.user_id);
     const ids = activeMembers.map(m => m.user_id);
     if (!ids.length) return 'אין עדיין חברים פעילים בקבוצה.';
-    const { data, error } = await sb.from('trades').select('user_id, points, tools_used, analysis_id').in('user_id', ids);
+    const { data, error } = await sb.from('trades').select('user_id, trade_date, points, tools_used').in('user_id', ids);
     if (error){ console.error(error); return ''; }
     const rows = data || [];
-    const analysisIds = [...new Set(rows.map(r => r.analysis_id).filter(Boolean))];
-    const analysesMap = {};
-    if (analysisIds.length){
-      const { data: analysisRows } = await sb.from('daily_analyses').select('id, tools_used').in('id', analysisIds);
-      (analysisRows || []).forEach(a => { analysesMap[a.id] = a; });
-    }
-    const rowToolsUsed = (r) => (r.analysis_id && analysesMap[r.analysis_id] ? analysesMap[r.analysis_id].tools_used : r.tools_used) || [];
+    const rowToolsUsed = await buildRowToolsResolver(ids);
     let out = `קבוצה: ${group.name}\n\n`;
     activeMembers.forEach(m => {
       const name = memberDisplayName(m);
@@ -2578,16 +2546,10 @@
     const ids = activeMembers.map(m => m.user_id);
     if (!ids.length) return { context: '', maxId: sinceTradeId };
     const { data, error } = await sb.from('trades')
-      .select('id, user_id, dir, trade_date, points, tools_used, confidence, notes, analysis_id').in('user_id', ids).order('id');
+      .select('id, user_id, dir, trade_date, points, tools_used, confidence, notes').in('user_id', ids).order('id');
     if (error){ console.error(error); return { context: '', maxId: sinceTradeId }; }
     const rows = data || [];
-    const analysisIds = [...new Set(rows.map(r => r.analysis_id).filter(Boolean))];
-    const analysesMap = {};
-    if (analysisIds.length){
-      const { data: analysisRows } = await sb.from('daily_analyses').select('id, tools_used').in('id', analysisIds);
-      (analysisRows || []).forEach(a => { analysesMap[a.id] = a; });
-    }
-    const rowToolsUsed = (r) => (r.analysis_id && analysesMap[r.analysis_id] ? analysesMap[r.analysis_id].tools_used : r.tools_used) || [];
+    const rowToolsUsed = await buildRowToolsResolver(ids);
     const maxId = rows.reduce((m,r) => Math.max(m, r.id), sinceTradeId);
     let out = `קבוצה: ${group.name}\n\n`;
     activeMembers.forEach(m => {
@@ -3137,7 +3099,7 @@
       const toolsStr = tTools.length
         ? tTools.map(k => (TOOL_DEFS.find(d => d.key === k)||{}).label || k).join(', ')
         : 'לא צוין';
-      const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+      const analysis = analysisForTrade(t);
       const analysisNotesStr = analysis && analysis.notes ? ` | ניתוח היום: ${analysis.notes.slice(0,200)}` : '';
       const notesStr = t.notes ? ` | הערות: ${t.notes.slice(0,200)}` : '';
       const confStr = t.confidence ? ` | ביטחון: ${t.confidence}/5` : '';
@@ -3174,7 +3136,7 @@
     const seenAnalysisIds = new Set();
     sorted.forEach(t => {
       ((t.images && t.images.general) || []).forEach(url => out.push({ url, date: t.date, label: 'תמונה כללית' }));
-      const analysis = t.analysisId ? analysesById[t.analysisId] : null;
+      const analysis = analysisForTrade(t);
       if (analysis){
         if (!seenAnalysisIds.has(analysis.id)){
           seenAnalysisIds.add(analysis.id);
